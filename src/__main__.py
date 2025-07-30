@@ -211,8 +211,8 @@ def send_dm_to_user(user_id, reply_text, files=None):
         client.chat_postMessage(
             channel=dm_channel,
             text=reply_text,
-            username="Fraudpheus",
-            icon_emoji=":orph:"
+            username="Fraud Department",
+            icon_emoji=":ban:"
         )
 
         # Upload files if they are there
@@ -404,8 +404,8 @@ def handle_channel_reply(message, client):
     reply_text = message["text"]
     files = message.get("files", [])
 
-    # Allow for notes (private messages between staff) by starting message with '!'
-    if not reply_text or (len(reply_text) > 0 and reply_text[0] == '!'):
+    # Allow for notes (private messages between staff) if message isn't started with '!'
+    if not reply_text or (len(reply_text) > 0 and reply_text[0] != '!'):
         return
 
     #if reply_text and files:
@@ -594,8 +594,8 @@ def handle_file_shared(event, client, logger):
                         client.chat_postMessage(
                             channel=dm_channel,
                             type="ephemeral",
-                            username="Fraudpheus",
-                            icon_emoji=":orph:",
+                            username="Fraud Department",
+                            icon_emoji=":ban:",
                             text="*No luck for you, there was an issue processing your file*"
                         )
 
