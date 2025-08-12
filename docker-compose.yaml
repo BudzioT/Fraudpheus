@@ -11,3 +11,5 @@ services:
       - CHANNEL_ID=${CHANNEL_ID}
       - AIRTABLE_API_KEY=${AIRTABLE_API_KEY}
       - AIRTABLE_BASE_ID=${AIRTABLE_BASE_ID}
+
+    
