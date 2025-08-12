@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  slack-bot:
+    build: .
+    restart: unless-stopped
+    environment:
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_USER_TOKEN=${SLACK_USER_TOKEN}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+      - CHANNEL_ID=${CHANNEL_ID}
+      - AIRTABLE_API_KEY=${AIRTABLE_API_KEY}
+      - AIRTABLE_BASE_ID=${AIRTABLE_BASE_ID}
