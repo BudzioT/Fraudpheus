@@ -199,7 +199,10 @@ def send_dm_to_user(user_id, reply_text, files=None):
         # Get DM channel of the user
         dm_response = client.conversations_open(users=[user_id])
         dm_channel = dm_response["channel"]["id"]
-
+        
+        if files or reply_text == "[Shared file]":
+            return True
+            
         # Temp v2
         # if not reply_text or reply_text.strip() == "":
         #    if files:
@@ -217,8 +220,7 @@ def send_dm_to_user(user_id, reply_text, files=None):
 
         # Upload files if they are there
         # Temp v2
-        if files and reply_text == "[Shared file]":
-            download_reupload_files(files, dm_channel)
+
 
         return True
 
@@ -407,6 +409,9 @@ def handle_channel_reply(message, client):
     # Allow for notes (private messages between staff) if message isn't started with '!'
     if not reply_text or (len(reply_text) > 0 and reply_text[0] != '!'):
         return
+
+    if reply_text[0] == '!':
+        reply_text = reply_text[1:]
 
     #if reply_text and files:
     #    return
