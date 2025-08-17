@@ -433,6 +433,14 @@ def handle_channel_reply(message, client):
         # Some logging
         if success:
             thread_manager.update_thread_activity(target_user_id)
+            try:
+                client.reactions_add(
+                    channel=CHANNEL,
+                    timestamp=message["ts"],
+                    name="done"
+                )
+            except SlackApiError as err:
+                print(f"Failed to add done reaction: {err}")
         else:
             print(f"Failed to send reply to user {target_user_id}")
             try:
