@@ -34,12 +34,12 @@ thread_manager = ThreadManager(airtable_base)
 
 # Macros
 MACROS = {
-    "!fnl": "Ban decisions are final. Thank you for your attention to this matter!",
-    "!ban": "Hi, after reviewing your account, we have found evidence of substantial botting/hour inflation. As a result, you have been banned from hackatime, and future Hack Club events. You can appeal this decision by sending appropriate proof to this thread.",
-    "!ddctn": "Hi, after reviewing your account for SoM we found evidence of significant botting/hour inflation for your project(s). As a result, you will receive a payout deduction. Please note that continuing to log fraudulent time on projects will result in a ban from hackatime, SoM, and potentially future Hack Club events.",
-    "!ndcl": "We cannot share our evidence for a ban due to the reasons outlined in the hackatime ban banner.",
-    "!dm": "with fraud team here:\nWe aren't able to share details on bans for the reasons outlined on hackatime:\n```\nWe do not disclose the patterns that were detected. Releasing this information would only benefit fraudsters. The fraud team regularly investigates claims of false bans to increase the effectiveness of our detection systems to combat fraud.\n```\nWhat I can tell you:\nYou were banned because your hackatime data matched patterns strongly indicative of fraud, and this was verified by human reviewers. Ban decisions are final and will not be lifted. If you were banned in error, the ban will automatically be lifted.",
-    "!alt": "Hi, we've determined that your account is/has an alt. Alting/ban evasion are not allowed. As a result, you've been banned from hackatime, SoM, and future Hack Club events."
+    "$fnl": "Ban decisions are final. Thank you for your attention to this matter!",
+    "$ban": "Hi, after reviewing your account, we have found evidence of substantial botting/hour inflation. As a result, you have been banned from hackatime, and future Hack Club events. You can appeal this decision by sending appropriate proof to this thread.",
+    "$ddctn": "Hi, after reviewing your account for SoM we found evidence of significant botting/hour inflation for your project(s). As a result, you will receive a payout deduction. Please note that continuing to log fraudulent time on projects will result in a ban from hackatime, SoM, and potentially future Hack Club events.",
+    "$ndcl": "We cannot share our evidence for a ban due to the reasons outlined in the hackatime ban banner.",
+    "$dm": "with fraud team here:\nWe aren't able to share details on bans for the reasons outlined on hackatime:\n```\nWe do not disclose the patterns that were detected. Releasing this information would only benefit fraudsters. The fraud team regularly investigates claims of false bans to increase the effectiveness of our detection systems to combat fraud.\n```\nWhat I can tell you:\nYou were banned because your hackatime data matched patterns strongly indicative of fraud, and this was verified by human reviewers. Ban decisions are final and will not be lifted. If you were banned in error, the ban will automatically be lifted.",
+    "$alt": "Hi, we've determined that your account is/has an alt. Alting/ban evasion are not allowed. As a result, you've been banned from hackatime, SoM, and future Hack Club events."
 }
 
 def expand_macros(text):
@@ -49,7 +49,7 @@ def expand_macros(text):
     
     for macro, replacement in MACROS.items():
         if macro in text:
-            if macro == "!dm":
+            if macro == "$dm":
                 user_match = re.search(r'<@([A-Z0-9]+)>', text)
                 if user_match:
                     text = text.replace(macro, f"<@{user_match.group(1)}> {replacement}")
@@ -63,7 +63,11 @@ def expand_macros(text):
 def call_ai_api(text):
     """Call ai.hackclub.com API to formalize text"""
     try:
-        prompt = f"Please rewrite the following message to be more formal and professional for customer service communication. Do not use em-dashes. Keep it concise and clear:\n\n{text}"
+        prompt = f"""./no_think
+
+Rewrite this message to be professional and appropriate for customer support. Be firm but also relatively casual and friendly. Do not use slang. Make it clear, direct, and business-appropriate without being overly formal. Do not add placeholders, such as [Your Name]. Do not use em-dashes. Do not call them "customers" or anything like that. Just improve the tone and clarity of the exact message provided:
+
+{text}"""
         
         response = requests.post("https://ai.hackclub.com/chat/completions", 
             headers={"Content-Type": "application/json"},
@@ -74,9 +78,13 @@ def call_ai_api(text):
         
         if response.status_code == 200:
             data = response.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if not content:
+                print(f"AI API returned empty content for: '{text}'")
+                print(f"Full response: {data}")
+            return content
         else:
-            print(f"AI API error: {response.status_code}")
+            print(f"AI API error: {response.status_code} - {response.text}")
             return None
     except Exception as err:
         print(f"Error calling AI API: {err}")
@@ -387,6 +395,18 @@ def handle_fdchat_cmd(ack, respond, command):
             dm_ts = send_dm_to_user(target_user_id, staff_message)
             thread_manager.update_thread_activity(target_user_id)
 
+            # Show expanded macro text if macros were used
+            if dm_ts:
+                expanded_text = expand_macros(staff_message)
+                if expanded_text != staff_message:
+                    client.chat_postMessage(
+                        channel=CHANNEL,
+                        thread_ts=thread_info["thread_ts"],
+                        text=f"📝 **Expanded macro text sent to user:**\n{expanded_text}",
+                        username="Macro Expander",
+                        icon_emoji=":memo:"
+                    )
+
             # Some nice logs for clarity
             if dm_ts:
                 respond({
@@ -432,6 +452,17 @@ def handle_fdchat_cmd(ack, respond, command):
             response["ts"],
             response["ts"]
         )
+
+        # Show expanded macro text if macros were used
+        expanded_text = expand_macros(staff_message)
+        if expanded_text != staff_message:
+            client.chat_postMessage(
+                channel=CHANNEL,
+                thread_ts=response["ts"],
+                text=f"📝 **Expanded macro text sent to user:**\n{expanded_text}",
+                username="Macro Expander",
+                icon_emoji=":memo:"
+            )
 
         respond({
             "response_type": "ephemeral",
@@ -523,6 +554,18 @@ def handle_channel_reply(message, client):
         if dm_ts:
             thread_manager.store_message_mapping(fraud_dept_ts, target_user_id, dm_ts, reply_text)
             thread_manager.update_thread_activity(target_user_id)
+            
+            # Show expanded macro text if macros were used
+            expanded_text = expand_macros(reply_text)
+            if expanded_text != reply_text:
+                client.chat_postMessage(
+                    channel=CHANNEL,
+                    thread_ts=thread_ts,
+                    text=f"📝 **Expanded macro text sent to user:**\n{expanded_text}",
+                    username="Macro Expander",
+                    icon_emoji=":memo:"
+                )
+            
             try:
                 client.reactions_add(
                     channel=CHANNEL,
@@ -551,6 +594,7 @@ def handle_ai_command(message, client):
         thread_ts = message["thread_ts"]
         
         if not original_text:
+            print("AI command failed: Empty message after $ai")
             client.reactions_add(
                 channel=CHANNEL,
                 timestamp=message["ts"],
@@ -562,6 +606,7 @@ def handle_ai_command(message, client):
         formatted_text = call_ai_api(original_text)
         
         if not formatted_text:
+            print(f"AI command failed: API returned no response for text: '{original_text}'")
             client.reactions_add(
                 channel=CHANNEL,
                 timestamp=message["ts"],
@@ -578,6 +623,7 @@ def handle_ai_command(message, client):
                 break
                 
         if not target_user_id:
+            print(f"AI command failed: No active thread found for thread_ts {thread_ts}")
             client.reactions_add(
                 channel=CHANNEL,
                 timestamp=message["ts"],
