@@ -65,7 +65,7 @@ def call_ai_api(text):
     try:
         prompt = f"""./no_think
 
-Rewrite this message to be professional and appropriate for customer support. Make it clear, direct, and business-appropriate without being overly formal. Do not add greetings like "Dear Customer" or closings. Do not use em-dashes. Just improve the tone and clarity of the exact message provided:
+Rewrite this message to be professional and appropriate for customer support. Be firm but also relatively casual and friendly. Do not use slang. Make it clear, direct, and business-appropriate without being overly formal. Do not add placeholders, such as [Your Name]. Do not use em-dashes. Do not call them "customers" or anything like that. Just improve the tone and clarity of the exact message provided:
 
 {text}"""
         
