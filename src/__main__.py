@@ -91,7 +91,7 @@ def check_inactive_threads():
             inactive_threads = thread_manager.get_inactive_threads(48)
             
             if inactive_threads:
-                reminder_text = f"🔔 **Thread Activity Reminder**\n\nThe following {len(inactive_threads)} thread(s) have been inactive for 2+ days:\n\n"
+                reminder_text = f"🔔 *Thread Activity Reminder*\n\nThe following {len(inactive_threads)} thread(s) have been inactive for 2+ days:\n\n"
                 
                 for thread in inactive_threads:
                     user_id = thread["user_id"]
@@ -388,15 +388,17 @@ def handle_fdchat_cmd(ack, respond, command):
             dm_ts = send_dm_to_user(target_user_id, staff_message)
             thread_manager.update_thread_activity(target_user_id)
 
-            # Show the sent message in fraud dept thread
+            # Only echo if macros were used
             if dm_ts:
-                client.chat_postMessage(
-                    channel=CHANNEL,
-                    thread_ts=thread_info["thread_ts"],
-                    text=f"📨 **Sent to user:**\n{staff_message}",
-                    username="Message Echo",
-                    icon_emoji=":outbox_tray:"
-                )
+                expanded_text = expand_macros(staff_message)
+                if expanded_text != staff_message:
+                    client.chat_postMessage(
+                        channel=CHANNEL,
+                        thread_ts=thread_info["thread_ts"],
+                        text=f"📨 *Sent to user:*\n{expanded_text}",
+                        username="Macro Echo",
+                        icon_emoji=":outbox_tray:"
+                    )
 
             # Some nice logs for clarity
             if dm_ts:
@@ -444,14 +446,16 @@ def handle_fdchat_cmd(ack, respond, command):
             response["ts"]
         )
 
-        # Show the sent message in fraud dept thread
-        client.chat_postMessage(
-            channel=CHANNEL,
-            thread_ts=response["ts"],
-            text=f"📨 **Sent to user:**\n{staff_message}",
-            username="Message Echo",
-            icon_emoji=":outbox_tray:"
-        )
+        # Only echo if macros were used
+        expanded_text = expand_macros(staff_message)
+        if expanded_text != staff_message:
+            client.chat_postMessage(
+                channel=CHANNEL,
+                thread_ts=response["ts"],
+                text=f"📨 *Sent to user:*\n{expanded_text}",
+                username="Macro Echo",
+                icon_emoji=":outbox_tray:"
+            )
 
         respond({
             "response_type": "ephemeral",
@@ -548,14 +552,15 @@ def handle_channel_reply(message, client):
             thread_manager.store_message_mapping(fraud_dept_ts, target_user_id, dm_ts, reply_text)
             thread_manager.update_thread_activity(target_user_id)
             
-            # Show the sent message in fraud dept thread (always show, not just for macros)
-            client.chat_postMessage(
-                channel=CHANNEL,
-                thread_ts=thread_ts,
-                text=f"📨 **Sent to user:**\n{reply_text}",
-                username="Message Echo",
-                icon_emoji=":outbox_tray:"
-            )
+            # Only echo if macros were used
+            if original_text != reply_text:
+                client.chat_postMessage(
+                    channel=CHANNEL,
+                    thread_ts=thread_ts,
+                    text=f"📨 *Sent to user:*\n{reply_text}",
+                    username="Macro Echo",
+                    icon_emoji=":outbox_tray:"
+                )
             
             try:
                 client.reactions_add(
@@ -609,7 +614,7 @@ def handle_ai_command(message, client):
         client.chat_postMessage(
             channel=CHANNEL,
             thread_ts=thread_ts,
-            text=f"🤖 **AI Writing Suggestion:**\n\n**Your text:**\n{original_text}\n\n**AI suggestion:**\n{formatted_text}",
+            text=f"🤖 *AI Writing Suggestion:*\n\n*Your text:*\n{original_text}\n\n*AI suggestion:*\n{formatted_text}",
             username="AI Writing Guide",
             icon_emoji=":robot_face:"
         )
