@@ -7,7 +7,6 @@ class ThreadManager:
     def __init__(self, airtable_base):
         self._active_cache = {}
         self._completed_cache = {}
-        self._message_mappings = {}
         self.active_threads_table = airtable_base.table("Active Threads")
         self.completed_threads_table = airtable_base.table("Completed Threads")
 
@@ -26,8 +25,7 @@ class ThreadManager:
                         "thread_ts": fields.get("thread_ts"),
                         "channel": fields.get("channel"),
                         "message_ts": fields.get("message_ts"),
-                        "record_id": record["id"],
-                        "last_activity": datetime.now()
+                        "record_id": record["id"]
                     }
 
             # Load completed threads
@@ -72,8 +70,7 @@ class ThreadManager:
                 "thread_ts": thread_ts,
                 "channel": channel,
                 "message_ts": message_ts,
-                "record_id": record["id"],
-                "last_activity": datetime.now()
+                "record_id": record["id"]
             }
 
             if user_id not in self._completed_cache:
@@ -91,13 +88,10 @@ class ThreadManager:
         if user_id not in self._active_cache:
             return
 
-        current_time = datetime.now()
-        self._active_cache[user_id]["last_activity"] = current_time
-
         try:
             record_id = self._active_cache[user_id]["record_id"]
             self.active_threads_table.update(record_id, {
-                "funny_field": current_time.strftime("%m/%d/%Y, %H:%M:%S")
+                "funny_field": datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
             })
         except Exception as err:
             print(f"Error updating thread activity ts: {err}")
@@ -176,36 +170,3 @@ class ThreadManager:
     @property
     def completed_cache(self):
         return self._completed_cache
-        
-    def store_message_mapping(self, fraud_dept_ts, user_id, dm_ts, message_text):
-        """Store mapping between fraud dept message and user DM message"""
-        self._message_mappings[fraud_dept_ts] = {
-            "user_id": user_id,
-            "dm_ts": dm_ts,
-            "message_text": message_text
-        }
-        
-    def get_message_mapping(self, fraud_dept_ts):
-        """Get message mapping by fraud dept timestamp"""
-        return self._message_mappings.get(fraud_dept_ts)
-        
-    def remove_message_mapping(self, fraud_dept_ts):
-        """Remove message mapping"""
-        if fraud_dept_ts in self._message_mappings:
-            del self._message_mappings[fraud_dept_ts]
-            
-    def get_inactive_threads(self, hours=48):
-        """Get threads inactive for more than specified hours"""
-        cutoff_time = datetime.now() - timedelta(hours=hours)
-        inactive_threads = []
-        
-        for user_id, thread_info in self._active_cache.items():
-            last_activity = thread_info.get("last_activity", datetime.now())
-            if last_activity < cutoff_time:
-                inactive_threads.append({
-                    "user_id": user_id,
-                    "thread_info": thread_info,
-                    "hours_inactive": (datetime.now() - last_activity).total_seconds() / 3600
-                })
-                
-        return inactive_threads

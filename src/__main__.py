@@ -1,9 +1,6 @@
 import os
 import re
 import time
-import threading
-import json
-from datetime import datetime, timedelta
 
 import requests
 from dotenv import load_dotenv
@@ -32,85 +29,6 @@ airtable_base = airtable_api.base(os.getenv("AIRTABLE_BASE_ID"))
 # Thread stuff
 thread_manager = ThreadManager(airtable_base)
 
-# Macros
-MACROS = {
-    "!fnl": "Ban decisions are final. Thank you for your attention to this matter!",
-    "!ban": "Hi, after reviewing your account, we have found evidence of substantial botting/hour inflation. As a result, you have been banned from hackatime, and future Hack Club events. You can appeal this decision by sending appropriate proof to this thread.",
-    "!ddctn": "Hi, after reviewing your account for SoM we found evidence of significant botting/hour inflation for your project(s). As a result, you will receive a payout deduction. Please note that continuing to log fraudulent time on projects will result in a ban from hackatime, SoM, and potentially future Hack Club events.",
-    "!ndcl": "We cannot share our evidence for a ban due to the reasons outlined in the hackatime ban banner.",
-    "!dm": "with fraud team here:\nWe aren't able to share details on bans for the reasons outlined on hackatime:\n```\nWe do not disclose the patterns that were detected. Releasing this information would only benefit fraudsters. The fraud team regularly investigates claims of false bans to increase the effectiveness of our detection systems to combat fraud.\n```\nWhat I can tell you:\nYou were banned because your hackatime data matched patterns strongly indicative of fraud, and this was verified by human reviewers. Ban decisions are final and will not be lifted. If you were banned in error, the ban will automatically be lifted.",
-    "!alt": "Hi, we've determined that your account is/has an alt. Alting/ban evasion are not allowed. As a result, you've been banned from hackatime, SoM, and future Hack Club events."
-}
-
-def expand_macros(text):
-    """Expand macros in text"""
-    if not text:
-        return text
-    
-    for macro, replacement in MACROS.items():
-        if macro in text:
-            if macro == "!dm":
-                user_match = re.search(r'<@([A-Z0-9]+)>', text)
-                if user_match:
-                    text = text.replace(macro, f"<@{user_match.group(1)}> {replacement}")
-                else:
-                    text = text.replace(macro, f"User {replacement}")
-            else:
-                text = text.replace(macro, replacement)
-    
-    return text
-
-def call_ai_api(text):
-    """Call ai.hackclub.com API to formalize text"""
-    try:
-        prompt = f"Please rewrite the following message to be more formal and professional for customer service communication. Do not use em-dashes. Keep it concise and clear:\n\n{text}"
-        
-        response = requests.post("https://ai.hackclub.com/chat/completions", 
-            headers={"Content-Type": "application/json"},
-            json={
-                "model": "qwen/qwen3-32b",
-                "messages": [{"role": "user", "content": prompt}]
-            })
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-        else:
-            print(f"AI API error: {response.status_code}")
-            return None
-    except Exception as err:
-        print(f"Error calling AI API: {err}")
-        return None
-
-def check_inactive_threads():
-    """Check for inactive threads and send reminders"""
-    while True:
-        try:
-            time.sleep(3600)  # Check every hour
-            inactive_threads = thread_manager.get_inactive_threads(48)
-            
-            if inactive_threads:
-                reminder_text = f"🔔 **Thread Activity Reminder**\n\nThe following {len(inactive_threads)} thread(s) have been inactive for 2+ days:\n\n"
-                
-                for thread in inactive_threads:
-                    user_id = thread["user_id"]
-                    hours_inactive = int(thread["hours_inactive"])
-                    thread_ts = thread["thread_info"]["thread_ts"]
-                    reminder_text += f"• <@{user_id}> - {hours_inactive} hours inactive - https://hackclub.slack.com/archives/{CHANNEL}/p{thread_ts.replace('.', '')}\n"
-                
-                reminder_text += "\nPlease review and resolve these threads."
-                
-                try:
-                    client.chat_postMessage(
-                        channel=CHANNEL,
-                        text=reminder_text
-                    )
-                    print(f"Sent reminder for {len(inactive_threads)} inactive threads")
-                except SlackApiError as err:
-                    print(f"Error sending reminder: {err}")
-                    
-        except Exception as err:
-            print(f"Error in inactive thread checker: {err}")
 
 def get_standard_channel_msg(user_id, message_text):
     """Get blocks for a standard message uploaded into channel with 2 buttons"""
@@ -283,7 +201,7 @@ def send_dm_to_user(user_id, reply_text, files=None):
         dm_channel = dm_response["channel"]["id"]
         
         if files or reply_text == "[Shared file]":
-            return None
+            return True
             
         # Temp v2
         # if not reply_text or reply_text.strip() == "":
@@ -293,7 +211,7 @@ def send_dm_to_user(user_id, reply_text, files=None):
         #        reply_text = "[Empty message]"
 
         # Message them
-        response = client.chat_postMessage(
+        client.chat_postMessage(
             channel=dm_channel,
             text=reply_text,
             username="Fraud Department",
@@ -303,12 +221,13 @@ def send_dm_to_user(user_id, reply_text, files=None):
         # Upload files if they are there
         # Temp v2
 
-        return response["ts"] if response.get("ok") else None
+
+        return True
 
     except SlackApiError as err:
         print(f"Error sending reply to user {user_id}: {err}")
         print(f"Error response: {err.response}")
-        return None
+        return False
 
 def extract_user_id(text):
     """Extracts user ID from a mention text <@U000000> or from a direct ID"""
@@ -354,7 +273,7 @@ def handle_fdchat_cmd(ack, respond, command):
     # Getting the info about request
     parts = command_text.split(" ", 1)
     user_id = parts[0]
-    staff_message = expand_macros(parts[1])
+    staff_message = parts[1]
 
     # Enter the nickname pls
     target_user_id = extract_user_id(user_id)
@@ -384,11 +303,11 @@ def handle_fdchat_cmd(ack, respond, command):
                 thread_ts=thread_info["thread_ts"],
                 text=f"*<@{requester_id}> continued:*\n{staff_message}"
             )
-            dm_ts = send_dm_to_user(target_user_id, staff_message)
+            success = send_dm_to_user(target_user_id, staff_message)
             thread_manager.update_thread_activity(target_user_id)
 
             # Some nice logs for clarity
-            if dm_ts:
+            if success:
                 respond({
                     "response_type": "ephemeral",
                     "text": f"Message sent in some older thread to {user_info['display_name']}"
@@ -407,8 +326,8 @@ def handle_fdchat_cmd(ack, respond, command):
             return
     # Try to create a new thread (Try, not trying. It was standing out a lot, I had to fix it a little)
     try:
-        dm_ts = send_dm_to_user(target_user_id, staff_message)
-        if not dm_ts:
+        success = send_dm_to_user(target_user_id, staff_message)
+        if not success:
             respond({
                 "response_type": "ephemeral",
                 "text": f"Failed to send DM to {target_user_id}"
@@ -486,12 +405,6 @@ def handle_channel_reply(message, client):
     thread_ts = message["thread_ts"]
     reply_text = message["text"]
     files = message.get("files", [])
-    fraud_dept_ts = message["ts"]
-
-    # Check for $ai command
-    if reply_text and reply_text.startswith("$ai "):
-        handle_ai_command(message, client)
-        return
 
     # Allow for notes (private messages between staff) if message isn't started with '!'
     if not reply_text or (len(reply_text) > 0 and reply_text[0] != '!'):
@@ -499,8 +412,6 @@ def handle_channel_reply(message, client):
 
     if reply_text[0] == '!':
         reply_text = reply_text[1:]
-
-    reply_text = expand_macros(reply_text)
 
     #if reply_text and files:
     #    return
@@ -517,11 +428,10 @@ def handle_channel_reply(message, client):
             break
 
     if target_user_id:
-        dm_ts = send_dm_to_user(target_user_id, reply_text, files)
+        success = send_dm_to_user(target_user_id, reply_text, files)
 
         # Some logging
-        if dm_ts:
-            thread_manager.store_message_mapping(fraud_dept_ts, target_user_id, dm_ts, reply_text)
+        if success:
             thread_manager.update_thread_activity(target_user_id)
             try:
                 client.reactions_add(
@@ -543,117 +453,6 @@ def handle_channel_reply(message, client):
                 print(f"Failed to add X reaction: {err}")
     else:
         print(f"Could not find user for thread {thread_ts}")
-
-def handle_ai_command(message, client):
-    """Handle $ai command for message formalization"""
-    try:
-        original_text = message["text"][4:].strip()  # Remove "$ai "
-        thread_ts = message["thread_ts"]
-        
-        if not original_text:
-            client.reactions_add(
-                channel=CHANNEL,
-                timestamp=message["ts"],
-                name="x"
-            )
-            return
-            
-        # Call AI API
-        formatted_text = call_ai_api(original_text)
-        
-        if not formatted_text:
-            client.reactions_add(
-                channel=CHANNEL,
-                timestamp=message["ts"],
-                name="x"
-            )
-            return
-            
-        # Find target user for this thread
-        target_user_id = None
-        for user_id in thread_manager.active_cache:
-            thread_info = thread_manager.get_active_thread(user_id)
-            if thread_info and thread_info["thread_ts"] == thread_ts:
-                target_user_id = user_id
-                break
-                
-        if not target_user_id:
-            client.reactions_add(
-                channel=CHANNEL,
-                timestamp=message["ts"],
-                name="x"
-            )
-            return
-            
-        # Post formatted message with approval button
-        blocks = [
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"**AI Suggested Response:**\n{formatted_text}"
-                }
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"**Original:**\n{original_text}"
-                }
-            },
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Approve & Send"
-                        },
-                        "style": "primary",
-                        "action_id": "approve_ai_message",
-                        "value": json.dumps({
-                            "user_id": target_user_id,
-                            "message": formatted_text,
-                            "thread_ts": thread_ts
-                        })
-                    },
-                    {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Reject"
-                        },
-                        "style": "danger",
-                        "action_id": "reject_ai_message"
-                    }
-                ]
-            }
-        ]
-        
-        client.chat_postMessage(
-            channel=CHANNEL,
-            thread_ts=thread_ts,
-            text=f"AI suggested response for <@{target_user_id}>",
-            blocks=blocks
-        )
-        
-        client.reactions_add(
-            channel=CHANNEL,
-            timestamp=message["ts"],
-            name="robot_face"
-        )
-            
-    except Exception as err:
-        print(f"Error in AI command handler: {err}")
-        try:
-            client.reactions_add(
-                channel=CHANNEL,
-                timestamp=message["ts"],
-                name="x"
-            )
-        except SlackApiError:
-            pass
 
 
 @app.action("mark_completed")
@@ -680,74 +479,6 @@ def handle_mark_completed(ack, body, client):
 
     except SlackApiError as err:
         print(f"Error marking thread as completed: {err}")
-
-@app.action("approve_ai_message")
-def handle_approve_ai_message(ack, body, client):
-    """Handle approval of AI suggested message"""
-    ack()
-    
-    try:
-        action_data = json.loads(body["actions"][0]["value"])
-        user_id = action_data["user_id"]
-        message_text = action_data["message"]
-        thread_ts = action_data["thread_ts"]
-        
-        # Send the approved message to user
-        dm_ts = send_dm_to_user(user_id, message_text)
-        
-        if dm_ts:
-            # Store mapping and update activity
-            fraud_dept_ts = f"{time.time():.6f}".replace(".", "")  # Generate unique ts
-            thread_manager.store_message_mapping(fraud_dept_ts, user_id, dm_ts, message_text)
-            thread_manager.update_thread_activity(user_id)
-            
-            # Update the message to show it was sent
-            client.chat_update(
-                channel=CHANNEL,
-                ts=body["message"]["ts"],
-                text="✅ AI message approved and sent to user",
-                blocks=[
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": f"✅ **Sent to <@{user_id}>:**\n{message_text}"
-                        }
-                    }
-                ]
-            )
-        else:
-            client.chat_update(
-                channel=CHANNEL,
-                ts=body["message"]["ts"],
-                text="❌ Failed to send AI message to user"
-            )
-            
-    except Exception as err:
-        print(f"Error approving AI message: {err}")
-
-@app.action("reject_ai_message")
-def handle_reject_ai_message(ack, body, client):
-    """Handle rejection of AI suggested message"""
-    ack()
-    
-    try:
-        client.chat_update(
-            channel=CHANNEL,
-            ts=body["message"]["ts"],
-            text="❌ AI suggestion rejected",
-            blocks=[
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "❌ AI suggestion rejected"
-                    }
-                }
-            ]
-        )
-    except Exception as err:
-        print(f"Error rejecting AI message: {err}")
 
 @app.action("delete_thread")
 def handle_delete_thread(ack, body, client):
@@ -962,72 +693,8 @@ def download_reupload_files(files, channel, thread_ts=None):
 
 @app.event("message")
 def handle_message_events(body, logger):
-    """Handle message events including deletions"""
-    event = body.get("event", {})
-    
-    if event.get("subtype") == "message_deleted":
-        handle_message_deletion(event, logger)
-
-def handle_message_deletion(event, logger):
-    """Handle message deletion events"""
-    try:
-        deleted_ts = event.get("deleted_ts")
-        channel = event.get("channel")
-        
-        if not deleted_ts or not channel:
-            return
-            
-        if channel == CHANNEL:
-            handle_fraud_dept_deletion(deleted_ts, logger)
-        else:
-            handle_user_dm_deletion(deleted_ts, channel, logger)
-            
-    except Exception as err:
-        logger.error(f"Error handling message deletion: {err}")
-
-def handle_fraud_dept_deletion(deleted_ts, logger):
-    """Handle deletion of messages by fraud dept members - delete corresponding DM"""
-    try:
-        mapping = thread_manager.get_message_mapping(deleted_ts)
-        if not mapping:
-            return
-            
-        user_id = mapping["user_id"]
-        dm_ts = mapping["dm_ts"]
-        
-        try:
-            dm_response = client.conversations_open(users=[user_id])
-            dm_channel = dm_response["channel"]["id"]
-            
-            try:
-                user_client.chat_delete(
-                    channel=dm_channel,
-                    ts=dm_ts,
-                    as_user=True
-                )
-                print(f"Deleted DM message for user {user_id}")
-            except SlackApiError:
-                try:
-                    client.chat_delete(
-                        channel=dm_channel,
-                        ts=dm_ts
-                    )
-                    print(f"Deleted DM message for user {user_id} (as bot)")
-                except SlackApiError as delete_err:
-                    print(f"Failed to delete DM message for user {user_id}: {delete_err}")
-                    
-            thread_manager.remove_message_mapping(deleted_ts)
-            
-        except SlackApiError as err:
-            print(f"Error accessing DM channel for user {user_id}: {err}")
-                
-    except Exception as err:
-        logger.error(f"Error in fraud dept deletion handler: {err}")
-
-def handle_user_dm_deletion(deleted_ts, dm_channel, logger):
-    """Handle deletion of messages by users - keep them in fraud dept channel"""
+    """Please just don't spam errors that I have unhandled request"""
     pass
-
 
 @app.error
 def error_handler(error, body, logger):
@@ -1035,11 +702,6 @@ def error_handler(error, body, logger):
     logger.info(f"Request body: {body}")
 
 if __name__ == "__main__":
-    # Start background thread for checking inactive threads
-    reminder_thread = threading.Thread(target=check_inactive_threads, daemon=True)
-    reminder_thread.start()
-    
     handler = SocketModeHandler(app, os.getenv("SLACK_APP_TOKEN"))
     print("Bot running!")
-    print("Background reminder system started")
     handler.start()
