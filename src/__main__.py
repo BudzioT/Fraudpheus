@@ -78,9 +78,13 @@ Rewrite this message to be professional and appropriate for customer support. Ma
         
         if response.status_code == 200:
             data = response.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if not content:
+                print(f"AI API returned empty content for: '{text}'")
+                print(f"Full response: {data}")
+            return content
         else:
-            print(f"AI API error: {response.status_code}")
+            print(f"AI API error: {response.status_code} - {response.text}")
             return None
     except Exception as err:
         print(f"Error calling AI API: {err}")
@@ -391,6 +395,18 @@ def handle_fdchat_cmd(ack, respond, command):
             dm_ts = send_dm_to_user(target_user_id, staff_message)
             thread_manager.update_thread_activity(target_user_id)
 
+            # Show expanded macro text if macros were used
+            if dm_ts:
+                expanded_text = expand_macros(staff_message)
+                if expanded_text != staff_message:
+                    client.chat_postMessage(
+                        channel=CHANNEL,
+                        thread_ts=thread_info["thread_ts"],
+                        text=f"📝 **Expanded macro text sent to user:**\n{expanded_text}",
+                        username="Macro Expander",
+                        icon_emoji=":memo:"
+                    )
+
             # Some nice logs for clarity
             if dm_ts:
                 respond({
@@ -436,6 +452,17 @@ def handle_fdchat_cmd(ack, respond, command):
             response["ts"],
             response["ts"]
         )
+
+        # Show expanded macro text if macros were used
+        expanded_text = expand_macros(staff_message)
+        if expanded_text != staff_message:
+            client.chat_postMessage(
+                channel=CHANNEL,
+                thread_ts=response["ts"],
+                text=f"📝 **Expanded macro text sent to user:**\n{expanded_text}",
+                username="Macro Expander",
+                icon_emoji=":memo:"
+            )
 
         respond({
             "response_type": "ephemeral",
@@ -527,6 +554,18 @@ def handle_channel_reply(message, client):
         if dm_ts:
             thread_manager.store_message_mapping(fraud_dept_ts, target_user_id, dm_ts, reply_text)
             thread_manager.update_thread_activity(target_user_id)
+            
+            # Show expanded macro text if macros were used
+            expanded_text = expand_macros(reply_text)
+            if expanded_text != reply_text:
+                client.chat_postMessage(
+                    channel=CHANNEL,
+                    thread_ts=thread_ts,
+                    text=f"📝 **Expanded macro text sent to user:**\n{expanded_text}",
+                    username="Macro Expander",
+                    icon_emoji=":memo:"
+                )
+            
             try:
                 client.reactions_add(
                     channel=CHANNEL,
@@ -555,6 +594,7 @@ def handle_ai_command(message, client):
         thread_ts = message["thread_ts"]
         
         if not original_text:
+            print("AI command failed: Empty message after $ai")
             client.reactions_add(
                 channel=CHANNEL,
                 timestamp=message["ts"],
@@ -566,6 +606,7 @@ def handle_ai_command(message, client):
         formatted_text = call_ai_api(original_text)
         
         if not formatted_text:
+            print(f"AI command failed: API returned no response for text: '{original_text}'")
             client.reactions_add(
                 channel=CHANNEL,
                 timestamp=message["ts"],
@@ -582,6 +623,7 @@ def handle_ai_command(message, client):
                 break
                 
         if not target_user_id:
+            print(f"AI command failed: No active thread found for thread_ts {thread_ts}")
             client.reactions_add(
                 channel=CHANNEL,
                 timestamp=message["ts"],
