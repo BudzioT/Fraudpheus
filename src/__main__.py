@@ -34,10 +34,10 @@ thread_manager = ThreadManager(airtable_base)
 
 # Macros
 MACROS = {
-    "$fnl": "Ban decisions are final. Thank you for your attention to this matter!",
+    "$final": "Ban decisions are final. Thank you for your attention to this matter!",
     "$ban": "Hi, after reviewing your account, we have found evidence of substantial botting/hour inflation. As a result, you have been banned from hackatime, and future Hack Club events. You can appeal this decision by sending appropriate proof to this thread.",
-    "$ddctn": "Hi, after reviewing your account for SoM we found evidence of significant botting/hour inflation for your project(s). As a result, you will receive a payout deduction. Please note that continuing to log fraudulent time on projects will result in a ban from hackatime, SoM, and potentially future Hack Club events.",
-    "$ndcl": "We cannot share our evidence for a ban due to the reasons outlined in the hackatime ban banner.",
+    "$deduct": "Hi, after reviewing your account for SoM we found evidence of significant botting/hour inflation for your project(s). As a result, you will receive a payout deduction. Please note that continuing to log fraudulent time on projects will result in a ban from hackatime, SoM, and potentially future Hack Club events.",
+    "$noevidence": "We cannot share our evidence for a ban due to the reasons outlined in the hackatime ban banner.",
     "$dm": "We aren't able to share details on bans for the reasons outlined on hackatime:\n```\nWe do not disclose the patterns that were detected. Releasing this information would only benefit fraudsters. The fraud team regularly investigates claims of false bans to increase the effectiveness of our detection systems to combat fraud.\n```\nWhat I can tell you:\nYou were banned because your hackatime data matched patterns strongly indicative of fraud, and this was verified by human reviewers. Ban decisions are final and will not be lifted. If you were banned in error, the ban will automatically be lifted.",
     "$alt": "Hi, we've determined that your account is/has an alt. Alting/ban evasion are not allowed. As a result, you've been banned from hackatime, SoM, and future Hack Club events."
 }
@@ -91,7 +91,7 @@ def check_inactive_threads():
             inactive_threads = thread_manager.get_inactive_threads(48)
             
             if inactive_threads:
-                reminder_text = f"🔔 **Thread Activity Reminder**\n\nThe following {len(inactive_threads)} thread(s) have been inactive for 2+ days:\n\n"
+                reminder_text = f"🔔 *Thread Activity Reminder*\n\nThe following {len(inactive_threads)} thread(s) have been inactive for 2+ days:\n\n"
                 
                 for thread in inactive_threads:
                     user_id = thread["user_id"]
@@ -388,15 +388,17 @@ def handle_fdchat_cmd(ack, respond, command):
             dm_ts = send_dm_to_user(target_user_id, staff_message)
             thread_manager.update_thread_activity(target_user_id)
 
-            # Show the sent message in fraud dept thread
+            # Only echo if macros were used
             if dm_ts:
-                client.chat_postMessage(
-                    channel=CHANNEL,
-                    thread_ts=thread_info["thread_ts"],
-                    text=f"📨 **Sent to user:**\n{staff_message}",
-                    username="Message Echo",
-                    icon_emoji=":outbox_tray:"
-                )
+                expanded_text = expand_macros(staff_message)
+                if expanded_text != staff_message:
+                    client.chat_postMessage(
+                        channel=CHANNEL,
+                        thread_ts=thread_info["thread_ts"],
+                        text=f"📨 *Sent to user:*\n{expanded_text}",
+                        username="Macro Echo",
+                        icon_emoji=":outbox_tray:"
+                    )
 
             # Some nice logs for clarity
             if dm_ts:
@@ -444,14 +446,16 @@ def handle_fdchat_cmd(ack, respond, command):
             response["ts"]
         )
 
-        # Show the sent message in fraud dept thread
-        client.chat_postMessage(
-            channel=CHANNEL,
-            thread_ts=response["ts"],
-            text=f"📨 **Sent to user:**\n{staff_message}",
-            username="Message Echo",
-            icon_emoji=":outbox_tray:"
-        )
+        # Only echo if macros were used
+        expanded_text = expand_macros(staff_message)
+        if expanded_text != staff_message:
+            client.chat_postMessage(
+                channel=CHANNEL,
+                thread_ts=response["ts"],
+                text=f"📨 *Sent to user:*\n{expanded_text}",
+                username="Macro Echo",
+                icon_emoji=":outbox_tray:"
+            )
 
         respond({
             "response_type": "ephemeral",
@@ -548,14 +552,15 @@ def handle_channel_reply(message, client):
             thread_manager.store_message_mapping(fraud_dept_ts, target_user_id, dm_ts, reply_text)
             thread_manager.update_thread_activity(target_user_id)
             
-            # Show the sent message in fraud dept thread (always show, not just for macros)
-            client.chat_postMessage(
-                channel=CHANNEL,
-                thread_ts=thread_ts,
-                text=f"📨 **Sent to user:**\n{reply_text}",
-                username="Message Echo",
-                icon_emoji=":outbox_tray:"
-            )
+            # Only echo if macros were used
+            if original_text != reply_text:
+                client.chat_postMessage(
+                    channel=CHANNEL,
+                    thread_ts=thread_ts,
+                    text=f"📨 *Sent to user:*\n{reply_text}",
+                    username="Macro Echo",
+                    icon_emoji=":outbox_tray:"
+                )
             
             try:
                 client.reactions_add(
@@ -609,7 +614,7 @@ def handle_ai_command(message, client):
         client.chat_postMessage(
             channel=CHANNEL,
             thread_ts=thread_ts,
-            text=f"🤖 **AI Writing Suggestion:**\n\n**Your text:**\n{original_text}\n\n**AI suggestion:**\n{formatted_text}",
+            text=f"🤖 *AI Writing Suggestion:*\n\n*Your text:*\n{original_text}\n\n*AI suggestion:*\n{formatted_text}",
             username="AI Writing Guide",
             icon_emoji=":robot_face:"
         )
