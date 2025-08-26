@@ -38,7 +38,7 @@ MACROS = {
     "$ban": "Hi, after reviewing your account, we have found evidence of substantial botting/hour inflation. As a result, you have been banned from hackatime, and future Hack Club events. You can appeal this decision by sending appropriate proof to this thread.",
     "$ddctn": "Hi, after reviewing your account for SoM we found evidence of significant botting/hour inflation for your project(s). As a result, you will receive a payout deduction. Please note that continuing to log fraudulent time on projects will result in a ban from hackatime, SoM, and potentially future Hack Club events.",
     "$ndcl": "We cannot share our evidence for a ban due to the reasons outlined in the hackatime ban banner.",
-    "$dm": "with fraud team here:\nWe aren't able to share details on bans for the reasons outlined on hackatime:\n```\nWe do not disclose the patterns that were detected. Releasing this information would only benefit fraudsters. The fraud team regularly investigates claims of false bans to increase the effectiveness of our detection systems to combat fraud.\n```\nWhat I can tell you:\nYou were banned because your hackatime data matched patterns strongly indicative of fraud, and this was verified by human reviewers. Ban decisions are final and will not be lifted. If you were banned in error, the ban will automatically be lifted.",
+    "$dm": "We aren't able to share details on bans for the reasons outlined on hackatime:\n```\nWe do not disclose the patterns that were detected. Releasing this information would only benefit fraudsters. The fraud team regularly investigates claims of false bans to increase the effectiveness of our detection systems to combat fraud.\n```\nWhat I can tell you:\nYou were banned because your hackatime data matched patterns strongly indicative of fraud, and this was verified by human reviewers. Ban decisions are final and will not be lifted. If you were banned in error, the ban will automatically be lifted.",
     "$alt": "Hi, we've determined that your account is/has an alt. Alting/ban evasion are not allowed. As a result, you've been banned from hackatime, SoM, and future Hack Club events."
 }
 
@@ -49,14 +49,7 @@ def expand_macros(text):
     
     for macro, replacement in MACROS.items():
         if macro in text:
-            if macro == "$dm":
-                user_match = re.search(r'<@([A-Z0-9]+)>', text)
-                if user_match:
-                    text = text.replace(macro, f"<@{user_match.group(1)}> {replacement}")
-                else:
-                    text = text.replace(macro, f"User {replacement}")
-            else:
-                text = text.replace(macro, replacement)
+            text = text.replace(macro, replacement)
     
     return text
 
@@ -72,7 +65,7 @@ Rewrite this message to be professional and appropriate for customer support. Be
         response = requests.post("https://ai.hackclub.com/chat/completions", 
             headers={"Content-Type": "application/json"},
             json={
-                "model": "qwen/qwen3-32b",
+                "model": "openai/gpt-oss-120b",
                 "messages": [{"role": "user", "content": prompt}]
             })
         
@@ -395,17 +388,15 @@ def handle_fdchat_cmd(ack, respond, command):
             dm_ts = send_dm_to_user(target_user_id, staff_message)
             thread_manager.update_thread_activity(target_user_id)
 
-            # Show expanded macro text if macros were used
+            # Show the sent message in fraud dept thread
             if dm_ts:
-                expanded_text = expand_macros(staff_message)
-                if expanded_text != staff_message:
-                    client.chat_postMessage(
-                        channel=CHANNEL,
-                        thread_ts=thread_info["thread_ts"],
-                        text=f"📝 **Expanded macro text sent to user:**\n{expanded_text}",
-                        username="Macro Expander",
-                        icon_emoji=":memo:"
-                    )
+                client.chat_postMessage(
+                    channel=CHANNEL,
+                    thread_ts=thread_info["thread_ts"],
+                    text=f"📨 **Sent to user:**\n{staff_message}",
+                    username="Message Echo",
+                    icon_emoji=":outbox_tray:"
+                )
 
             # Some nice logs for clarity
             if dm_ts:
@@ -453,16 +444,14 @@ def handle_fdchat_cmd(ack, respond, command):
             response["ts"]
         )
 
-        # Show expanded macro text if macros were used
-        expanded_text = expand_macros(staff_message)
-        if expanded_text != staff_message:
-            client.chat_postMessage(
-                channel=CHANNEL,
-                thread_ts=response["ts"],
-                text=f"📝 **Expanded macro text sent to user:**\n{expanded_text}",
-                username="Macro Expander",
-                icon_emoji=":memo:"
-            )
+        # Show the sent message in fraud dept thread
+        client.chat_postMessage(
+            channel=CHANNEL,
+            thread_ts=response["ts"],
+            text=f"📨 **Sent to user:**\n{staff_message}",
+            username="Message Echo",
+            icon_emoji=":outbox_tray:"
+        )
 
         respond({
             "response_type": "ephemeral",
@@ -524,18 +513,22 @@ def handle_channel_reply(message, client):
         handle_ai_command(message, client)
         return
 
-    # Allow for notes (private messages between staff) if message isn't started with '!'
-    if not reply_text or (len(reply_text) > 0 and reply_text[0] != '!'):
+    # Check if it's a direct macro (starts with $)
+    is_macro = reply_text and any(reply_text.startswith(macro) for macro in MACROS.keys())
+    
+    # Allow for notes (private messages between staff) if message isn't started with '!' or isn't a macro
+    if not reply_text or (not is_macro and len(reply_text) > 0 and reply_text[0] != '!'):
         return
 
-    if reply_text[0] == '!':
+    # Remove ! prefix if present (for backwards compatibility)
+    if reply_text and reply_text[0] == '!' and not is_macro:
         reply_text = reply_text[1:]
 
+    original_text = reply_text
     reply_text = expand_macros(reply_text)
 
     #if reply_text and files:
     #    return
-
 
     # Find user's active thread by TS (look in cache -> look at TS)
     target_user_id = None
@@ -555,16 +548,14 @@ def handle_channel_reply(message, client):
             thread_manager.store_message_mapping(fraud_dept_ts, target_user_id, dm_ts, reply_text)
             thread_manager.update_thread_activity(target_user_id)
             
-            # Show expanded macro text if macros were used
-            expanded_text = expand_macros(reply_text)
-            if expanded_text != reply_text:
-                client.chat_postMessage(
-                    channel=CHANNEL,
-                    thread_ts=thread_ts,
-                    text=f"📝 **Expanded macro text sent to user:**\n{expanded_text}",
-                    username="Macro Expander",
-                    icon_emoji=":memo:"
-                )
+            # Show the sent message in fraud dept thread (always show, not just for macros)
+            client.chat_postMessage(
+                channel=CHANNEL,
+                thread_ts=thread_ts,
+                text=f"📨 **Sent to user:**\n{reply_text}",
+                username="Message Echo",
+                icon_emoji=":outbox_tray:"
+            )
             
             try:
                 client.reactions_add(
@@ -614,74 +605,13 @@ def handle_ai_command(message, client):
             )
             return
             
-        # Find target user for this thread
-        target_user_id = None
-        for user_id in thread_manager.active_cache:
-            thread_info = thread_manager.get_active_thread(user_id)
-            if thread_info and thread_info["thread_ts"] == thread_ts:
-                target_user_id = user_id
-                break
-                
-        if not target_user_id:
-            print(f"AI command failed: No active thread found for thread_ts {thread_ts}")
-            client.reactions_add(
-                channel=CHANNEL,
-                timestamp=message["ts"],
-                name="x"
-            )
-            return
-            
-        # Post formatted message with approval button
-        blocks = [
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"**AI Suggested Response:**\n{formatted_text}"
-                }
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"**Original:**\n{original_text}"
-                }
-            },
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Approve & Send"
-                        },
-                        "style": "primary",
-                        "action_id": "approve_ai_message",
-                        "value": json.dumps({
-                            "user_id": target_user_id,
-                            "message": formatted_text,
-                            "thread_ts": thread_ts
-                        })
-                    },
-                    {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Reject"
-                        },
-                        "style": "danger",
-                        "action_id": "reject_ai_message"
-                    }
-                ]
-            }
-        ]
-        
+        # Just show the AI suggestion as a guide (no send buttons)
         client.chat_postMessage(
             channel=CHANNEL,
             thread_ts=thread_ts,
-            text=f"AI suggested response for <@{target_user_id}>",
-            blocks=blocks
+            text=f"🤖 **AI Writing Suggestion:**\n\n**Your text:**\n{original_text}\n\n**AI suggestion:**\n{formatted_text}",
+            username="AI Writing Guide",
+            icon_emoji=":robot_face:"
         )
         
         client.reactions_add(
@@ -727,73 +657,6 @@ def handle_mark_completed(ack, body, client):
     except SlackApiError as err:
         print(f"Error marking thread as completed: {err}")
 
-@app.action("approve_ai_message")
-def handle_approve_ai_message(ack, body, client):
-    """Handle approval of AI suggested message"""
-    ack()
-    
-    try:
-        action_data = json.loads(body["actions"][0]["value"])
-        user_id = action_data["user_id"]
-        message_text = action_data["message"]
-        thread_ts = action_data["thread_ts"]
-        
-        # Send the approved message to user
-        dm_ts = send_dm_to_user(user_id, message_text)
-        
-        if dm_ts:
-            # Store mapping and update activity
-            fraud_dept_ts = f"{time.time():.6f}".replace(".", "")  # Generate unique ts
-            thread_manager.store_message_mapping(fraud_dept_ts, user_id, dm_ts, message_text)
-            thread_manager.update_thread_activity(user_id)
-            
-            # Update the message to show it was sent
-            client.chat_update(
-                channel=CHANNEL,
-                ts=body["message"]["ts"],
-                text="✅ AI message approved and sent to user",
-                blocks=[
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": f"✅ **Sent to <@{user_id}>:**\n{message_text}"
-                        }
-                    }
-                ]
-            )
-        else:
-            client.chat_update(
-                channel=CHANNEL,
-                ts=body["message"]["ts"],
-                text="❌ Failed to send AI message to user"
-            )
-            
-    except Exception as err:
-        print(f"Error approving AI message: {err}")
-
-@app.action("reject_ai_message")
-def handle_reject_ai_message(ack, body, client):
-    """Handle rejection of AI suggested message"""
-    ack()
-    
-    try:
-        client.chat_update(
-            channel=CHANNEL,
-            ts=body["message"]["ts"],
-            text="❌ AI suggestion rejected",
-            blocks=[
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "❌ AI suggestion rejected"
-                    }
-                }
-            ]
-        )
-    except Exception as err:
-        print(f"Error rejecting AI message: {err}")
 
 @app.action("delete_thread")
 def handle_delete_thread(ack, body, client):
