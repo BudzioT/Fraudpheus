@@ -11,3 +11,24 @@ services:
       - CHANNEL_ID=${CHANNEL_ID}
       - AIRTABLE_API_KEY=${AIRTABLE_API_KEY}
       - AIRTABLE_BASE_ID=${AIRTABLE_BASE_ID}
+      - FRAUDPHEUS_API_KEY=${FRAUDPHEUS_API_KEY}
+      - FRAUDPHEUS_WEBHOOK_URLS=${FRAUDPHEUS_WEBHOOK_URLS}
+      - FRAUDPHEUS_WEBHOOK_SECRET=${FRAUDPHEUS_WEBHOOK_SECRET}
+
+  api:
+    build: .
+    restart: unless-stopped
+    # in theory this should override the CMD line
+    command: ['uvicorn', 'src.api:app', '--host', '0.0.0.0', '--port', '8000']
+    ports:
+      - '8000:8000'
+    environment:
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_USER_TOKEN=${SLACK_USER_TOKEN}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+      - CHANNEL_ID=${CHANNEL_ID}
+      - AIRTABLE_API_KEY=${AIRTABLE_API_KEY}
+      - AIRTABLE_BASE_ID=${AIRTABLE_BASE_ID}
+      - FRAUDPHEUS_API_KEY=${FRAUDPHEUS_API_KEY}
+      - FRAUDPHEUS_WEBHOOK_URLS=${FRAUDPHEUS_WEBHOOK_URLS}
+      - FRAUDPHEUS_WEBHOOK_SECRET=${FRAUDPHEUS_WEBHOOK_SECRET}
