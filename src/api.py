@@ -154,7 +154,13 @@ async def send_message(thread_ts: str, body: dict, _: None = Depends(require_api
         post = client.chat_postMessage(
             channel=CHANNEL,
             thread_ts=thread_ts,
-            text=f"*<@{author_slack_id}>:*\n{content}"
+            text=f"*<@{author_slack_id}>:*\n{content}",
+            blocks=[
+                {
+                    "type": "markdown",
+                    "text": f"*<@{author_slack_id}>:*\n{content}"
+                }
+            ]
         )
         thread_manager.update_thread_activity(target_user_id)
         ts_float = float(post["ts"]) if post.get("ts") else 0
@@ -189,7 +195,13 @@ async def post_internal_note(thread_ts: str, body: dict, _: None = Depends(requi
         client.chat_postMessage(
             channel=CHANNEL,
             thread_ts=thread_ts,
-            text=f"[Internal Note from {author_name}]: {content}"
+            text=f"[Internal Note from {author_name}]: {content}",
+            blocks=[
+                {
+                    "type": "markdown",
+                    "text": f"**[Internal Note from {author_name}]:** {content}"
+                }
+            ]
         )
         return {"success": True}
     except SlackApiError as err:
