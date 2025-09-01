@@ -3,7 +3,7 @@ import re
 import time
 import threading
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 from dotenv import load_dotenv
@@ -15,6 +15,7 @@ from slack_sdk.errors import SlackApiError
 from pyairtable import Api
 
 from src.thread_manager import ThreadManager
+from src.webhooks import dispatch_event
 
 load_dotenv()
 
@@ -233,6 +234,16 @@ def post_message_to_channel(user_id, message_text, user_info, files=None):
                 download_reupload_files(files, CHANNEL, thread_info["thread_ts"])
 
             thread_manager.update_thread_activity(user_id)
+            dispatch_event("message.user.new", {
+                "thread_ts": thread_info["thread_ts"],
+                "message": {
+                    "id": response["ts"],
+                    "content": message_text,
+                    "timestamp": datetime.fromtimestamp(float(response["ts"])) .astimezone(timezone.utc).isoformat().replace("+00:00","Z"),
+                    "is_from_user": True,
+                    "author": {"name": user_info["display_name"]}
+                }
+            })
             return True
 
         except SlackApiError as err:
@@ -269,6 +280,17 @@ def create_new_thread(user_id, message_text, user_info, files=None):
             response["ts"],
             response["ts"]
         )
+        if success:
+            dispatch_event("message.user.new", {
+                "thread_ts": response["ts"],
+                "message": {
+                    "id": response["ts"],
+                    "content": message_text,
+                    "timestamp": datetime.fromtimestamp(float(response["ts"])) .astimezone(timezone.utc).isoformat().replace("+00:00","Z"),
+                    "is_from_user": True,
+                    "author": {"name": user_info["display_name"]}
+                }
+            })
 
         return success
 
@@ -380,7 +402,7 @@ def handle_fdchat_cmd(ack, respond, command):
         thread_info = thread_manager.get_active_thread(target_user_id)
 
         try:
-            client.chat_postMessage(
+            response = client.chat_postMessage(
                 channel=CHANNEL,
                 thread_ts=thread_info["thread_ts"],
                 text=f"*<@{requester_id}> continued:*\n{staff_message}"
@@ -399,6 +421,18 @@ def handle_fdchat_cmd(ack, respond, command):
                         username="Macro Echo",
                         icon_emoji=":outbox_tray:"
                     )
+                # Store mapping + dispatch staff message event
+                thread_manager.store_message_mapping(response["ts"], target_user_id, dm_ts, staff_message, thread_info["thread_ts"])
+                dispatch_event("message.staff.new", {
+                    "thread_ts": thread_info["thread_ts"],
+                    "message": {
+                        "id": response["ts"],
+                        "content": staff_message,
+                        "timestamp": datetime.fromtimestamp(float(response["ts"])) .astimezone(timezone.utc).isoformat().replace("+00:00","Z"),
+                        "is_from_user": False,
+                        "author": {"name": get_user_info(requester_id)["name"] if requester_id else "Unknown"}
+                    }
+                })
 
             # Some nice logs for clarity
             if dm_ts:
@@ -427,7 +461,7 @@ def handle_fdchat_cmd(ack, respond, command):
                 "text": f"Failed to send DM to {target_user_id}"
             })
             return
-
+        original_sent_text = staff_message
         staff_message = f"*<@{requester_id}> started a message to <@{target_user_id}>:*\n" + staff_message
 
         response = client.chat_postMessage(
@@ -445,6 +479,23 @@ def handle_fdchat_cmd(ack, respond, command):
             response["ts"],
             response["ts"]
         )
+        thread_manager.store_message_mapping(response["ts"], target_user_id, dm_ts, original_sent_text, response["ts"])  # root msg mapping
+        dispatch_event("thread.created", {
+            "thread_ts": response["ts"],
+            "user_slack_id": target_user_id,
+            "started_at": datetime.fromtimestamp(float(response["ts"])) .astimezone(timezone.utc).isoformat().replace("+00:00","Z"),
+            "initial_message": original_sent_text
+        })
+        dispatch_event("message.staff.new", {
+            "thread_ts": response["ts"],
+            "message": {
+                "id": response["ts"],
+                "content": original_sent_text,
+                "timestamp": datetime.fromtimestamp(float(response["ts"])) .astimezone(timezone.utc).isoformat().replace("+00:00","Z"),
+                "is_from_user": False,
+                "author": {"name": get_user_info(requester_id)["name"] if requester_id else "Unknown"}
+            }
+        })
 
         # Only echo if macros were used
         expanded_text = expand_macros(staff_message)
@@ -492,7 +543,7 @@ def handle_all_messages(message, say, client, logger):
     files = message.get("files", [])
     channel_id = message.get("channel")
 
-    #print(f"Message received - Channel: {channel_id}, Type: {channel_type}")
+    print(f"Message received - Channel: {channel_id}, Type: {channel_type}")
 
     # Skip bot stuff
     if message.get("bot_id"):
@@ -549,7 +600,17 @@ def handle_channel_reply(message, client):
 
         # Some logging
         if dm_ts:
-            thread_manager.store_message_mapping(fraud_dept_ts, target_user_id, dm_ts, reply_text)
+            thread_manager.store_message_mapping(fraud_dept_ts, target_user_id, dm_ts, reply_text, thread_ts)
+            dispatch_event("message.staff.new", {
+                "thread_ts": thread_ts,
+                "message": {
+                    "id": fraud_dept_ts,
+                    "content": reply_text,
+                    "timestamp": datetime.fromtimestamp(float(fraud_dept_ts)).astimezone(timezone.utc).isoformat().replace("+00:00","Z"),
+                    "is_from_user": False,
+                    "author": {"name": get_user_info(message["user"]) ["name"] if message.get("user") else "Unknown"}
+                }
+            })
             thread_manager.update_thread_activity(target_user_id)
             
             # Only echo if macros were used
@@ -656,6 +717,13 @@ def handle_mark_completed(ack, body, client):
         success = thread_manager.complete_thread(user_id)
         if success:
             print(f"Marked thread for user {user_id} as completed")
+            thread_info = thread_manager.get_active_thread(user_id) or {}
+            dispatch_event("thread.status.changed", {
+                "thread_ts": body["message"]["ts"],
+                "user_slack_id": user_id,
+                "new_status": "completed",
+                "timestamp": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat().replace("+00:00","Z")
+            })
         else:
             print(f"Failed to mark {user_id}'s thread as completed")
 
@@ -881,6 +949,8 @@ def handle_message_events(body, logger):
     
     if event.get("subtype") == "message_deleted":
         handle_message_deletion(event, logger)
+    elif event.get("subtype") == "message_changed":
+        handle_message_changed(event, logger)
 
 def handle_message_deletion(event, logger):
     """Handle message deletion events"""
@@ -930,7 +1000,14 @@ def handle_fraud_dept_deletion(deleted_ts, logger):
                 except SlackApiError as delete_err:
                     print(f"Failed to delete DM message for user {user_id}: {delete_err}")
                     
+            mapping = thread_manager.get_message_mapping(deleted_ts)
+            thread_ts = mapping.get("thread_ts") if mapping else None
             thread_manager.remove_message_mapping(deleted_ts)
+            if thread_ts:
+                dispatch_event("message.deleted", {
+                    "thread_ts": thread_ts,
+                    "message_id": deleted_ts
+                })
             
         except SlackApiError as err:
             print(f"Error accessing DM channel for user {user_id}: {err}")
@@ -941,6 +1018,34 @@ def handle_fraud_dept_deletion(deleted_ts, logger):
 def handle_user_dm_deletion(deleted_ts, dm_channel, logger):
     """Handle deletion of messages by users - keep them in fraud dept channel"""
     pass
+
+def handle_message_changed(event, logger):
+    try:
+        message = event.get("message", {})
+        edited = message.get("edited")
+        if not message or not edited:
+            return
+        ts = message.get("ts")
+        channel = event.get("channel")
+        if channel != CHANNEL:
+            return
+        mapping = thread_manager.get_message_mapping(ts)
+        if not mapping:
+            return
+        thread_ts = mapping.get("thread_ts")
+        content = message.get("text", "")
+        dispatch_event("message.updated", {
+            "thread_ts": thread_ts,
+            "message": {
+                "id": ts,
+                "content": content,
+                "timestamp": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat().replace("+00:00","Z"),
+                "is_from_user": False,
+                "author": {"name": "Unknown"}
+            }
+        })
+    except Exception as err:
+        logger.error(f"Error handling message_changed: {err}")
 
 
 @app.error
