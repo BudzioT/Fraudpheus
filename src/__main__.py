@@ -348,7 +348,7 @@ def extract_user_id(text):
     return None
 
 
-@app.command("/testfdchat")
+@app.command("/fdchat")
 def handle_fdchat_cmd(ack, respond, command):
     """Handle conversations started by staff"""
     ack()
