@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 class ThreadManager:
@@ -8,6 +8,7 @@ class ThreadManager:
         self._active_cache = {}
         self._completed_cache = {}
         self._message_mappings = {}
+        self._thread_ts_to_user_id = {}
         self.active_threads_table = airtable_base.table("Active Threads")
         self.completed_threads_table = airtable_base.table("Completed Threads")
 
@@ -29,6 +30,8 @@ class ThreadManager:
                         "record_id": record["id"],
                         "last_activity": datetime.now()
                     }
+                    if fields.get("thread_ts"):
+                        self._thread_ts_to_user_id[fields.get("thread_ts")] = user_id
 
             # Load completed threads
             completed_records = self.completed_threads_table.all()
@@ -44,6 +47,8 @@ class ThreadManager:
                         "message_ts": fields.get("message_ts"),
                         "record_id": record["id"]
                     })
+                    if fields.get("thread_ts"):
+                        self._thread_ts_to_user_id[fields.get("thread_ts")] = user_id
             completed_threads_count = sum(len(threads) for threads in self._completed_cache.values())
             print(f"Loaded {len(self._active_cache)} active and {completed_threads_count} completed threads from db")
 
@@ -75,6 +80,7 @@ class ThreadManager:
                 "record_id": record["id"],
                 "last_activity": datetime.now()
             }
+            self._thread_ts_to_user_id[thread_ts] = user_id
 
             if user_id not in self._completed_cache:
                 self._completed_cache[user_id] = []
@@ -128,6 +134,7 @@ class ThreadManager:
                 "message_ts": active_thread["message_ts"],
                 "record_id": completed_record["id"]
             })
+            self._thread_ts_to_user_id[active_thread["thread_ts"]] = user_id
             del self._active_cache[user_id]
 
             print(f"Completed thread for user {user_id}")
@@ -161,6 +168,8 @@ class ThreadManager:
 
                         self.completed_threads_table.delete(record_id)
                         removed_thread = self._completed_cache[user_id].pop(i)
+                        if removed_thread.get("thread_ts") in self._thread_ts_to_user_id:
+                            del self._thread_ts_to_user_id[removed_thread.get("thread_ts")]
                         print(f"Deleted finished thread of {user_id}")
                         return removed_thread, False
 
@@ -177,12 +186,12 @@ class ThreadManager:
     def completed_cache(self):
         return self._completed_cache
         
-    def store_message_mapping(self, fraud_dept_ts, user_id, dm_ts, message_text):
-        """Store mapping between fraud dept message and user DM message"""
+    def store_message_mapping(self, fraud_dept_ts, user_id, dm_ts, message_text, thread_ts):
         self._message_mappings[fraud_dept_ts] = {
             "user_id": user_id,
             "dm_ts": dm_ts,
-            "message_text": message_text
+            "message_text": message_text,
+            "thread_ts": thread_ts
         }
         
     def get_message_mapping(self, fraud_dept_ts):
@@ -209,3 +218,6 @@ class ThreadManager:
                 })
                 
         return inactive_threads
+
+    def get_user_by_thread_ts(self, thread_ts):
+        return self._thread_ts_to_user_id.get(thread_ts)
