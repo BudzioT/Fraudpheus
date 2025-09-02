@@ -55,13 +55,49 @@ class ThreadManager:
         except Exception as err:
             print(f"Error loading threads from Airtable: {err}")
 
+    def _check_airtable_for_user(self, user_id):
+        try:
+            # Use Airtable's formula syntax for an exact match
+            formula = f"{{user_id}} = '{user_id}'"
+            records = self.active_threads_table.all(formula=formula, max_records=1)
+
+            if not records:
+                return None
+            
+            record = records[0]
+            fields = record["fields"]
+            thread_data = {
+                "thread_ts": fields.get("thread_ts"),
+                "channel": fields.get("channel"),
+                "message_ts": fields.get("message_ts"),
+                "record_id": record["id"],
+                "last_activity": datetime.now()
+            }
+            
+            self._active_cache[user_id] = thread_data
+            if thread_data.get("thread_ts"):
+                self._thread_ts_to_user_id[thread_data["thread_ts"]] = user_id
+            
+            print(f"Cache miss for {user_id}. Fetched and cached active thread from Airtable.")
+            return thread_data
+
+        except Exception as err:
+            print(f"Error checking Airtable for user {user_id}: {err}")
+            return None
+
     def get_active_thread(self, user_id):
-        """Get active thread for a user"""
-        return self._active_cache.get(user_id)
+        """Get active thread for a user, checking Airtable on cache miss."""
+        thread = self._active_cache.get(user_id)
+        if thread:
+            return thread
+        
+        return self._check_airtable_for_user(user_id)
 
     def has_active_thread(self, user_id):
-        """Does user have an existing thread"""
-        return user_id in self._active_cache
+        if user_id in self._active_cache:
+            return True
+        
+        return self._check_airtable_for_user(user_id) is not None
 
     def create_active_thread(self, user_id, channel, thread_ts, message_ts):
         """Create new active thread"""
