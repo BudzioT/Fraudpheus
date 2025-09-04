@@ -88,7 +88,7 @@ def check_inactive_threads():
     """Check for inactive threads and send reminders"""
     while True:
         try:
-            time.sleep(3600)  # Check every hour
+            time.sleep(3600 * 6)  # Check every 6 hours
             inactive_threads = thread_manager.get_inactive_threads(48)
             
             if inactive_threads:
