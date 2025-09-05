@@ -189,19 +189,40 @@ async def send_message(thread_ts: str, body: dict, _: None = Depends(require_api
 async def post_internal_note(thread_ts: str, body: dict, _: None = Depends(require_api_key)):
     content = body.get("content")
     author_name = body.get("author_name")
-    if not content or not author_name:
+    attachments = body.get("attachments") or []
+    if not content and not attachments:
         raise HTTPException(400, "Missing required fields")
+    if not author_name:
+        raise HTTPException(400, "Missing required fields")
+
+    display_text = content or "(attachments)"
+
+    main_text = f"**[Internal Note from {author_name}]:**"
+    if content:
+        main_text += f" {content}"
+
+    blocks = [
+        {
+            "type": "markdown",
+            "text": main_text
+        }
+    ]
+
+    for att in attachments:
+        if isinstance(att, dict) and att.get("image_url"):
+            blocks.append({
+                "type": "image",
+                "image_url": att["image_url"],
+                "alt_text": att.get("alt_text", "attachment")
+            })
+
+    print(blocks)
     try:
         client.chat_postMessage(
             channel=CHANNEL,
             thread_ts=thread_ts,
-            text=f"[Internal Note from {author_name}]: {content}",
-            blocks=[
-                {
-                    "type": "markdown",
-                    "text": f"**[Internal Note from {author_name}]:** {content}"
-                }
-            ]
+            text=f"[Internal Note from {author_name}]: {display_text}",
+            blocks=blocks
         )
         return {"success": True}
     except SlackApiError as err:
