@@ -151,7 +151,26 @@ def get_standard_channel_msg(user_id, message_text):
                     },
                     "style": "primary",
                     "action_id": "mark_completed",
-                    "value": user_id
+                    "value": user_id,
+                    "confirm": { 
+                        "title": {
+                            "type": "plain_text",
+                            "text": "Are you sure?"
+                        },
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "This will mark the thread as complete."
+                        },
+                        "confirm": {
+                            "type": "plain_text",
+                            "text": "Mark as Completed"
+                        },
+                        "deny": {
+                            "type": "plain_text",
+                            "text": "Cancel"
+                        }
+                    }
+
                 },
                 { # Delete it pls
                     "type": "button",
