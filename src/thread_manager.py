@@ -4,13 +4,14 @@ from datetime import datetime, timedelta
 class ThreadManager:
     """Manages threads with the help of Airtable"""
 
-    def __init__(self, airtable_base):
+    def __init__(self, airtable_base, slack_client=None):
         self._active_cache = {}
         self._completed_cache = {}
         self._message_mappings = {}
         self._thread_ts_to_user_id = {}
         self.active_threads_table = airtable_base.table("Active Threads")
         self.completed_threads_table = airtable_base.table("Completed Threads")
+        self.slack_client = slack_client
 
         self._load_from_airtable()
 
@@ -257,3 +258,50 @@ class ThreadManager:
 
     def get_user_by_thread_ts(self, thread_ts):
         return self._thread_ts_to_user_id.get(thread_ts)
+    
+    def get_thread_conversation(self, user_id):
+        """Get full conversation for a thread"""
+        if not self.slack_client or user_id not in self._active_cache:
+            return None
+            
+        thread_info = self._active_cache[user_id]
+        channel = thread_info.get("channel")
+        thread_ts = thread_info.get("thread_ts")
+        
+        try:
+            # Get all messages in the thread
+            response = self.slack_client.conversations_replies(
+                channel=channel,
+                ts=thread_ts,
+                inclusive=True
+            )
+            
+            if not response.get("ok"):
+                return None
+                
+            messages = response.get("messages", [])
+            conversation_text = ""
+            
+            for msg in messages:
+                # Skip bot messages and system messages
+                if msg.get("bot_id") or msg.get("subtype"):
+                    continue
+                    
+                user_id_msg = msg.get("user", "")
+                text = msg.get("text", "")
+                
+                if text:
+                    # Get username for better context
+                    try:
+                        user_info = self.slack_client.users_info(user=user_id_msg)
+                        username = user_info.get("user", {}).get("real_name") or user_info.get("user", {}).get("name") or user_id_msg
+                    except:
+                        username = user_id_msg
+                    
+                    conversation_text += f"{username}: {text}\n"
+            
+            return conversation_text.strip()
+            
+        except Exception as err:
+            print(f"Error getting thread conversation for {user_id}: {err}")
+            return None
