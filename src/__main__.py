@@ -25,13 +25,14 @@ client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
 user_client = WebClient(token=os.getenv("SLACK_USER_TOKEN"))
 
 CHANNEL = os.getenv("CHANNEL_ID")
+AI_ALERTS_CHANNEL = "C09F4AVU6UA"  # Channel for AI resolution alerts
 
 # Airtable setup
 airtable_api = Api(os.getenv("AIRTABLE_API_KEY"))
 airtable_base = airtable_api.base(os.getenv("AIRTABLE_BASE_ID"))
 
 # Thread stuff
-thread_manager = ThreadManager(airtable_base)
+thread_manager = ThreadManager(airtable_base, client)
 
 # Macros
 MACROS = {
@@ -84,6 +85,101 @@ Rewrite this message to be professional and appropriate for customer support. Be
         print(f"Error calling AI API: {err}")
         return None
 
+def analyze_thread_resolution(conversation_text):
+    """Use AI to determine if a thread appears to be resolved"""
+    try:
+        prompt = f"""./no_think
+
+Analyze this customer support conversation and determine if the issue appears to be resolved.
+
+Look for:
+- Clear resolution statements from support staff
+- User acknowledgment or satisfaction
+- Final answers or decisions being communicated
+- Ban confirmations or account actions completed
+- Appeals being closed with final decisions
+
+Respond with ONLY "RESOLVED" or "UNRESOLVED" based on whether the conversation appears to have reached a clear conclusion.
+
+Conversation:
+{conversation_text}"""
+        
+        response = requests.post("https://ai.hackclub.com/chat/completions", 
+            headers={"Content-Type": "application/json"},
+            json={
+                "model": "openai/gpt-oss-120b",
+                "messages": [{"role": "user", "content": prompt}]
+            })
+        
+        if response.status_code == 200:
+            data = response.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip().upper()
+            return content == "RESOLVED"
+        else:
+            print(f"AI resolution analysis error: {response.status_code} - {response.text}")
+            return False
+    except Exception as err:
+        print(f"Error analyzing thread resolution: {err}")
+        return False
+
+def post_ai_resolution_alert(user_id, thread_info):
+    """Post AI-detected resolution to alerts channel with mark resolved button"""
+    try:
+        user_info = get_user_info(user_id)
+        display_name = user_info["display_name"] if user_info else user_id
+        
+        thread_ts = thread_info["thread_ts"]
+        thread_url = f"https://hackclub.slack.com/archives/{CHANNEL}/p{thread_ts.replace('.', '')}"
+        
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"🤖 *AI Detection: Thread May Be Resolved*\n\nUser: <@{user_id}> ({display_name})\nThread: <{thread_url}|View Thread>\n\nAI analysis suggests this thread conversation appears to be resolved."
+                }
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Mark as Resolved"
+                        },
+                        "style": "primary",
+                        "action_id": "ai_mark_resolved",
+                        "value": user_id
+                    },
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Keep Open"
+                        },
+                        "action_id": "ai_keep_open",
+                        "value": user_id
+                    }
+                ]
+            }
+        ]
+        
+        client.chat_postMessage(
+            channel=AI_ALERTS_CHANNEL,
+            text=f"AI detected potentially resolved thread for {display_name}",
+            blocks=blocks,
+            username="AI Resolution Detection",
+            icon_emoji=":robot_face:"
+        )
+        
+        print(f"Posted AI resolution alert for user {user_id}")
+        return True
+        
+    except Exception as err:
+        print(f"Error posting AI resolution alert: {err}")
+        return False
+
 def check_inactive_threads():
     """Check for inactive threads and send reminders"""
     while True:
@@ -113,6 +209,57 @@ def check_inactive_threads():
                     
         except Exception as err:
             print(f"Error in inactive thread checker: {err}")
+
+def check_ai_thread_resolutions():
+    """Background task to check for resolved threads using AI"""
+    checked_threads = set()  # Track threads we've already analyzed
+    
+    while True:
+        try:
+            time.sleep(7200)  # Check every 2 hours
+            print("Starting AI thread resolution analysis...")
+            
+            active_threads = list(thread_manager.active_cache.items())
+            newly_analyzed = 0
+            
+            for user_id, thread_info in active_threads:
+                # Skip if we've already analyzed this thread
+                thread_key = f"{user_id}_{thread_info.get('thread_ts')}"
+                if thread_key in checked_threads:
+                    continue
+                
+                # Get the full conversation
+                conversation = thread_manager.get_thread_conversation(user_id)
+                if not conversation:
+                    continue
+                
+                # Skip very short conversations (likely not resolved)
+                if len(conversation) < 100:
+                    continue
+                
+                print(f"Analyzing thread for user {user_id}...")
+                
+                # Analyze with AI
+                if analyze_thread_resolution(conversation):
+                    print(f"AI detected resolved thread for user {user_id}")
+                    post_ai_resolution_alert(user_id, thread_info)
+                    newly_analyzed += 1
+                
+                # Mark this thread as analyzed
+                checked_threads.add(thread_key)
+                
+                # Small delay between analyses to avoid rate limits
+                time.sleep(2)
+            
+            print(f"AI analysis complete. Found {newly_analyzed} potentially resolved threads.")
+            
+            # Clean up checked_threads set if it gets too large
+            if len(checked_threads) > 1000:
+                checked_threads.clear()
+                print("Cleared checked threads cache")
+                
+        except Exception as err:
+            print(f"Error in AI thread resolution checker: {err}")
 
 def get_standard_channel_msg(user_id, message_text):
     """Get blocks for a standard message uploaded into channel with 2 buttons"""
@@ -750,6 +897,64 @@ def handle_mark_completed(ack, body, client):
         print(f"Error marking thread as completed: {err}")
 
 
+@app.action("ai_mark_resolved")
+def handle_ai_mark_resolved(ack, body, client):
+    """Handle marking thread as resolved from AI suggestion"""
+    ack()
+    
+    user_id = body["actions"][0]["value"]
+    
+    try:
+        success = thread_manager.complete_thread(user_id)
+        if success:
+            # Update the message to show it was resolved
+            client.chat_update(
+                channel=body["channel"]["id"],
+                ts=body["message"]["ts"],
+                text=f"✅ Thread for <@{user_id}> marked as resolved",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"✅ *Thread Resolved*\n\nUser: <@{user_id}>\nMarked as resolved based on AI analysis."
+                        }
+                    }
+                ]
+            )
+            print(f"AI-suggested thread for user {user_id} marked as resolved")
+        else:
+            print(f"Failed to resolve AI-suggested thread for user {user_id}")
+    except Exception as err:
+        print(f"Error handling AI mark resolved: {err}")
+
+@app.action("ai_keep_open")
+def handle_ai_keep_open(ack, body, client):
+    """Handle keeping thread open from AI suggestion"""
+    ack()
+    
+    user_id = body["actions"][0]["value"]
+    
+    try:
+        # Update the message to show it was kept open
+        client.chat_update(
+            channel=body["channel"]["id"],
+            ts=body["message"]["ts"],
+            text=f"📝 Thread for <@{user_id}> kept open",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"📝 *Thread Kept Open*\n\nUser: <@{user_id}>\nAI suggestion overridden - thread remains active."
+                    }
+                }
+            ]
+        )
+        print(f"AI-suggested thread for user {user_id} kept open")
+    except Exception as err:
+        print(f"Error handling AI keep open: {err}")
+
 @app.action("delete_thread")
 def handle_delete_thread(ack, body, client):
     """Handle deleting thread"""
@@ -1077,7 +1282,12 @@ if __name__ == "__main__":
     reminder_thread = threading.Thread(target=check_inactive_threads, daemon=True)
     reminder_thread.start()
     
+    # Start background thread for AI resolution analysis
+    ai_resolution_thread = threading.Thread(target=check_ai_thread_resolutions, daemon=True)
+    ai_resolution_thread.start()
+    
     handler = SocketModeHandler(app, os.getenv("SLACK_APP_TOKEN"))
     print("Bot running!")
     print("Background reminder system started")
+    print("AI resolution detection system started")
     handler.start()
