@@ -3,7 +3,6 @@
 import os
 import json
 import time
-import requests
 from datetime import datetime, timezone
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -77,13 +76,12 @@ class FraudpheusExtractor:
         hours = int(elapsed // 3600)
         minutes = int((elapsed % 3600) // 60)
 
-        status_text = f"""🔄 **Fraudpheus Case Export Status**
+        status_text = f"""🔄 **Fraudpheus Message Export**
 
 **Progress:** {self.processed_cases} cases processed
 **Runtime:** {hours}h {minutes}m
-**Started:** {datetime.fromtimestamp(self.start_time).strftime('%Y-%m-%d %H:%M:%S')}
 
-*Extracting all fraud case data...*"""
+*Extracting messages from fraud cases...*"""
 
         try:
             if self.status_message_ts:
@@ -96,8 +94,7 @@ class FraudpheusExtractor:
                 response = self.client.chat_postMessage(
                     channel=self.channel,
                     text=status_text,
-                    username="Fraudpheus Extractor",
-                    icon_emoji=":mag:"
+                    username="Message Extractor"
                 )
                 self.status_message_ts = response["ts"]
         except SlackApiError as e:
@@ -115,7 +112,6 @@ class FraudpheusExtractor:
                     active_threads.append({
                         "thread_ts": fields.get("thread_ts"),
                         "user_id": fields.get("user_id"),
-                        "channel": fields.get("channel"),
                         "status": "active"
                     })
 
@@ -126,7 +122,6 @@ class FraudpheusExtractor:
                     completed_threads.append({
                         "thread_ts": fields.get("thread_ts"),
                         "user_id": fields.get("user_id"),
-                        "channel": fields.get("channel"),
                         "status": "completed"
                     })
 
@@ -160,8 +155,6 @@ class FraudpheusExtractor:
                 "status": case_thread["status"],
                 "thread_ts": thread_ts,
                 "messages": [],
-                "staff_actions": [],
-                "files_shared": [],
                 "created_at": None,
                 "last_activity": None,
                 "total_messages": len(messages)
@@ -181,30 +174,8 @@ class FraudpheusExtractor:
                     "is_bot": message.get("bot_id") is not None,
                     "bot_id": message.get("bot_id"),
                     "username": message.get("username"),
-                    "files": [],
-                    "reactions": message.get("reactions", []),
-                    "edited": message.get("edited"),
                     "is_from_reported_user": msg_user_id == user_id and not message.get("bot_id")
                 }
-
-                for file_info in message.get("files", []):
-                    file_data = {
-                        "id": file_info.get("id"),
-                        "name": file_info.get("name"),
-                        "title": file_info.get("title"),
-                        "mimetype": file_info.get("mimetype"),
-                        "size": file_info.get("size"),
-                        "url_private": file_info.get("url_private"),
-                        "url_private_download": file_info.get("url_private_download"),
-                        "permalink": file_info.get("permalink"),
-                        "filetype": file_info.get("filetype"),
-                        "is_image": file_info.get("mimetype", "").startswith("image/") if file_info.get("mimetype") else False
-                    }
-                    message_data["files"].append(file_data)
-                    case_data["files_shared"].append(file_data)
-
-                if message.get("text", "").startswith(("$", "!")):
-                    case_data["staff_actions"].append(message_data)
 
                 case_data["messages"].append(message_data)
 
@@ -220,7 +191,7 @@ class FraudpheusExtractor:
             return None
 
     def run_extraction(self):
-        print("Starting Fraudpheus case extraction...")
+        print("Starting Fraudpheus message extraction...")
 
         self.post_status_update()
 
@@ -243,63 +214,65 @@ class FraudpheusExtractor:
                 self.post_status_update()
                 setattr(self, '_last_status_update', time.time())
 
-            time.sleep(1)
+            time.sleep(0.5)
 
         self.cases_data["statistics"] = {
             "total_cases": len(self.cases_data["fraud_cases"]),
             "active_cases": len([c for c in self.cases_data["fraud_cases"] if c["status"] == "active"]),
             "completed_cases": len([c for c in self.cases_data["fraud_cases"] if c["status"] == "completed"]),
             "total_users": len(self.cases_data["users"]),
-            "total_files": sum(len(c["files_shared"]) for c in self.cases_data["fraud_cases"]),
+            "total_messages": sum(c["total_messages"] for c in self.cases_data["fraud_cases"]),
             "processing_time_seconds": time.time() - self.start_time
         }
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"fraudpheus_cases_{timestamp}.json"
+        filename = f"fraudpheus_messages_{timestamp}.json"
 
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(self.cases_data, f, indent=2, ensure_ascii=False)
+        json_content = json.dumps(self.cases_data, indent=2, ensure_ascii=False)
 
-        completion_text = f"""✅ **Fraudpheus Case Export Complete!**
+        completion_text = f"""✅ **Message Export Complete!**
 
-**Final Statistics:**
-• {self.cases_data['statistics']['total_cases']} fraud cases exported
-• {self.cases_data['statistics']['active_cases']} active cases
-• {self.cases_data['statistics']['completed_cases']} completed cases
-• {self.cases_data['statistics']['total_users']} users involved
-• {self.cases_data['statistics']['total_files']} files/images shared
+**Statistics:**
+• {self.cases_data['statistics']['total_cases']} fraud cases
+• {self.cases_data['statistics']['total_messages']} total messages
+• {self.cases_data['statistics']['total_users']} users
 • Processing time: {int(self.cases_data['statistics']['processing_time_seconds'] // 60)} minutes
 
-**Export saved to:** `{filename}`
-
-All fraud case data extracted! 🔍"""
+**Backup file attached below** 📎"""
 
         try:
-            self.client.chat_postMessage(
+            self.client.files_upload_v2(
                 channel=self.channel,
-                text=completion_text,
-                username="Fraudpheus Extractor",
-                icon_emoji=":white_check_mark:"
+                content=json_content.encode('utf-8'),
+                filename=filename,
+                title=f"Fraudpheus Message Export - {timestamp}",
+                initial_comment=completion_text
             )
         except SlackApiError as e:
-            print(f"Error posting completion message: {e}")
+            print(f"Error uploading file: {e}")
+            try:
+                self.client.chat_postMessage(
+                    channel=self.channel,
+                    text=completion_text + f"\n\n❌ **File upload failed:** {str(e)[:200]}",
+                    username="Message Extractor"
+                )
+            except SlackApiError:
+                pass
 
-        print(f"\n{'='*60}")
-        print("FRAUDPHEUS EXTRACTION COMPLETE!")
-        print(f"Exported {self.cases_data['statistics']['total_cases']} fraud cases")
-        print(f"Active: {self.cases_data['statistics']['active_cases']}, Completed: {self.cases_data['statistics']['completed_cases']}")
-        print(f"Files shared: {self.cases_data['statistics']['total_files']}")
-        print(f"Data saved to: {filename}")
-        print(f"{'='*60}")
+        print(f"\nEXTRACTION COMPLETE!")
+        print(f"Cases: {self.cases_data['statistics']['total_cases']}")
+        print(f"Messages: {self.cases_data['statistics']['total_messages']}")
+        print(f"Users: {self.cases_data['statistics']['total_users']}")
+        print(f"File uploaded: {filename}")
 
 def main():
     try:
         extractor = FraudpheusExtractor()
         extractor.run_extraction()
     except KeyboardInterrupt:
-        print("\nExtraction interrupted by user")
+        print("\nExtraction interrupted")
     except Exception as e:
-        print(f"Extraction failed with error: {e}")
+        print(f"Extraction failed: {e}")
         import traceback
         traceback.print_exc()
 
