@@ -1,4 +1,5 @@
 <i>I suck at python ~ Bartosz 19/06/2025</i>
+<i> python is funny ~ Arnav 18/09/2025</i> 
 
 # Fraudpheus
 ## Origin
@@ -8,15 +9,21 @@ people who are accused of committing fraud in Summer of Making program made by H
 We were receiving lots of DMs, and even emails from angry people, some were searching
 other ways to reach us by finding our social medias.
 <br>
-To make it more private and safer for us, I've created a bot which keeps our identities hidden
+To make it more private and safer for us, We've created a bot which keeps our identities hidden
 
 ## Features
 - Communicating between people who DM your bot and members of certain channel
-- Ability of your team to take notes by typing `!` at the start of reply - message won't be sent as DM that way,
-it will remain in the channel.
+- AI-powered responses that help handle common queries automatically (with human approval)
+- Smart triages that categorize and prioritize incoming messages
+- Custom "hidden" messages by typing `!` at the start of reply - won't be sent as DM,
+stays in the channel for team notes
+- Macros for quick responses to frequently asked questions
 - Keeping track of which cases are resolved and which not by marking threads as completed
 - Deleting threads to keep the channel clean
-- Transferring files between channel members and people DMing the bot
+- Transferring files between channel members and people DMing the bot 
+- AI powered thread resolving 🤓🤓 "i'm so cool ~ Arnav"
+- Integration with wakatime/hackatime fraud detectors
+- Backup chats feature
 
 ## Usage
 - Type `/fdchat @user msg` where `user` is a mention of someone (ping) and `msg` is your desired message. 
