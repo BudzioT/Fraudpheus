@@ -824,28 +824,20 @@ def handle_backup_command(message, client):
         thread_ts = message.get("thread_ts")
         user_id = message.get("user")
 
-        client.reactions_add(
-            channel=CHANNEL,
-            timestamp=message["ts"],
-            name="arrows_clockwise"
-        )
-
-        initial_message = "🔄 **Backup Started**\n\nFraudpheus case extraction initiated...\nThis will extract all fraud cases from Airtable and Slack."
+        initial_message = "🔄 **Backup Started**\n\nFraudpheus message extraction initiated...\nThis will extract all messages from fraud cases."
 
         if thread_ts:
             response = client.chat_postMessage(
                 channel=CHANNEL,
                 thread_ts=thread_ts,
                 text=initial_message,
-                username="Backup Bot",
-                icon_emoji=":floppy_disk:"
+                username="Backup Bot"
             )
         else:
             response = client.chat_postMessage(
                 channel=CHANNEL,
                 text=initial_message,
-                username="Backup Bot",
-                icon_emoji=":floppy_disk:"
+                username="Backup Bot"
             )
 
         def run_backup():
@@ -860,7 +852,7 @@ def handle_backup_command(message, client):
                 ], capture_output=True, text=True, cwd=script_dir)
 
                 if result.returncode == 0:
-                    success_msg = f"✅ **Backup Complete!**\n\nExtraction finished successfully.\nCheck the channel for detailed results."
+                    success_msg = f"✅ **Backup Complete!**\n\nMessage extraction finished successfully.\nCheck the channel for detailed results."
                 else:
                     success_msg = f"❌ **Backup Failed**\n\nError: {result.stderr[:500]}"
 
@@ -869,15 +861,13 @@ def handle_backup_command(message, client):
                         channel=CHANNEL,
                         thread_ts=thread_ts,
                         text=success_msg,
-                        username="Backup Bot",
-                        icon_emoji=":white_check_mark:" if result.returncode == 0 else ":x:"
+                        username="Backup Bot"
                     )
                 else:
                     client.chat_postMessage(
                         channel=CHANNEL,
                         text=success_msg,
-                        username="Backup Bot",
-                        icon_emoji=":white_check_mark:" if result.returncode == 0 else ":x:"
+                        username="Backup Bot"
                     )
 
             except Exception as e:
@@ -887,15 +877,13 @@ def handle_backup_command(message, client):
                         channel=CHANNEL,
                         thread_ts=thread_ts,
                         text=error_msg,
-                        username="Backup Bot",
-                        icon_emoji=":x:"
+                        username="Backup Bot"
                     )
                 else:
                     client.chat_postMessage(
                         channel=CHANNEL,
                         text=error_msg,
-                        username="Backup Bot",
-                        icon_emoji=":x:"
+                        username="Backup Bot"
                     )
 
         backup_thread = threading.Thread(target=run_backup, daemon=True)
@@ -905,14 +893,6 @@ def handle_backup_command(message, client):
 
     except Exception as err:
         print(f"Error in backup command handler: {err}")
-        try:
-            client.reactions_add(
-                channel=CHANNEL,
-                timestamp=message["ts"],
-                name="x"
-            )
-        except SlackApiError:
-            pass
 
 def handle_ai_command(message, client):
     """Handle $ai command for message formalization"""
