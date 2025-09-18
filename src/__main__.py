@@ -734,6 +734,11 @@ def handle_channel_reply(message, client):
         handle_ai_command(message, client)
         return
 
+    # Check for !backup command
+    if reply_text and reply_text.strip() == "!backup":
+        handle_backup_command(message, client)
+        return
+
     # Check if it's a direct macro (starts with $)
     is_macro = reply_text and any(reply_text.startswith(macro) for macro in MACROS.keys())
     
@@ -810,12 +815,105 @@ def handle_channel_reply(message, client):
     else:
         print(f"Could not find user for thread {thread_ts}")
 
+def handle_backup_command(message, client):
+    """Handle !backup command to start fraud case extraction"""
+    try:
+        thread_ts = message.get("thread_ts")
+        user_id = message.get("user")
+
+        client.reactions_add(
+            channel=CHANNEL,
+            timestamp=message["ts"],
+            name="arrows_clockwise"
+        )
+
+        initial_message = "🔄 **Backup Started**\n\nFraudpheus case extraction initiated...\nThis will extract all fraud cases from Airtable and Slack."
+
+        if thread_ts:
+            response = client.chat_postMessage(
+                channel=CHANNEL,
+                thread_ts=thread_ts,
+                text=initial_message,
+                username="Backup Bot",
+                icon_emoji=":floppy_disk:"
+            )
+        else:
+            response = client.chat_postMessage(
+                channel=CHANNEL,
+                text=initial_message,
+                username="Backup Bot",
+                icon_emoji=":floppy_disk:"
+            )
+
+        def run_backup():
+            import subprocess
+            import os
+            try:
+                result = subprocess.run([
+                    "python", "/workspaces/Fraudpheus/slack_to_mattermost_migration.py"
+                ], capture_output=True, text=True, cwd="/workspaces/Fraudpheus")
+
+                if result.returncode == 0:
+                    success_msg = f"✅ **Backup Complete!**\n\nExtraction finished successfully.\nCheck the channel for detailed results."
+                else:
+                    success_msg = f"❌ **Backup Failed**\n\nError: {result.stderr[:500]}"
+
+                if thread_ts:
+                    client.chat_postMessage(
+                        channel=CHANNEL,
+                        thread_ts=thread_ts,
+                        text=success_msg,
+                        username="Backup Bot",
+                        icon_emoji=":white_check_mark:" if result.returncode == 0 else ":x:"
+                    )
+                else:
+                    client.chat_postMessage(
+                        channel=CHANNEL,
+                        text=success_msg,
+                        username="Backup Bot",
+                        icon_emoji=":white_check_mark:" if result.returncode == 0 else ":x:"
+                    )
+
+            except Exception as e:
+                error_msg = f"❌ **Backup Error**\n\nFailed to run extraction: {str(e)[:500]}"
+                if thread_ts:
+                    client.chat_postMessage(
+                        channel=CHANNEL,
+                        thread_ts=thread_ts,
+                        text=error_msg,
+                        username="Backup Bot",
+                        icon_emoji=":x:"
+                    )
+                else:
+                    client.chat_postMessage(
+                        channel=CHANNEL,
+                        text=error_msg,
+                        username="Backup Bot",
+                        icon_emoji=":x:"
+                    )
+
+        backup_thread = threading.Thread(target=run_backup, daemon=True)
+        backup_thread.start()
+
+        print(f"Backup command initiated by user {user_id}")
+
+    except Exception as err:
+        print(f"Error in backup command handler: {err}")
+        try:
+            client.reactions_add(
+                channel=CHANNEL,
+                timestamp=message["ts"],
+                name="x"
+            )
+        except SlackApiError:
+            pass
+
 def handle_ai_command(message, client):
     """Handle $ai command for message formalization"""
     try:
         original_text = message["text"][4:].strip()  # Remove "$ai "
         thread_ts = message["thread_ts"]
-        
+
         if not original_text:
             print("AI command failed: Empty message after $ai")
             client.reactions_add(
@@ -824,10 +922,10 @@ def handle_ai_command(message, client):
                 name="x"
             )
             return
-            
+
         # Call AI API
         formatted_text = call_ai_api(original_text)
-        
+
         if not formatted_text:
             print(f"AI command failed: API returned no response for text: '{original_text}'")
             client.reactions_add(
@@ -836,7 +934,7 @@ def handle_ai_command(message, client):
                 name="x"
             )
             return
-            
+
         # Just show the AI suggestion as a guide (no send buttons)
         client.chat_postMessage(
             channel=CHANNEL,
@@ -845,13 +943,13 @@ def handle_ai_command(message, client):
             username="AI Writing Guide",
             icon_emoji=":robot_face:"
         )
-        
+
         client.reactions_add(
             channel=CHANNEL,
             timestamp=message["ts"],
             name="robot_face"
         )
-            
+
     except Exception as err:
         print(f"Error in AI command handler: {err}")
         try:
