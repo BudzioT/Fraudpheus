@@ -200,7 +200,7 @@ def check_inactive_threads():
                 
                 try:
                     client.chat_postMessage(
-                        channel=CHANNEL,
+                        channel=AI_ALERTS_CHANNEL,
                         text=reminder_text
                     )
                     print(f"Sent reminder for {len(inactive_threads)} inactive threads")
