@@ -718,9 +718,12 @@ def handle_all_messages(message, say, client, logger):
     # DMs to the bot
     if channel_type == "im":
         handle_dms(user_id, message_text, files, say)
-    # Replies in the support channel
-    elif channel_id == CHANNEL and "thread_ts" in message:
-        handle_channel_reply(message, client)
+    # Replies in the support channel or !backup in main channel
+    elif channel_id == CHANNEL:
+        if message_text and message_text.strip() == "!backup":
+            handle_backup_command(message, client)
+        elif "thread_ts" in message:
+            handle_channel_reply(message, client)
 
 def handle_channel_reply(message, client):
     """Handle replies in channel to send them to users"""
@@ -849,9 +852,12 @@ def handle_backup_command(message, client):
             import subprocess
             import os
             try:
+                script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                script_path = os.path.join(script_dir, "slack_to_mattermost_migration.py")
+
                 result = subprocess.run([
-                    "python", "/workspaces/Fraudpheus/slack_to_mattermost_migration.py"
-                ], capture_output=True, text=True, cwd="/workspaces/Fraudpheus")
+                    "python", script_path
+                ], capture_output=True, text=True, cwd=script_dir)
 
                 if result.returncode == 0:
                     success_msg = f"✅ **Backup Complete!**\n\nExtraction finished successfully.\nCheck the channel for detailed results."
