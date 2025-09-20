@@ -182,33 +182,7 @@ def post_ai_resolution_alert(user_id, thread_info):
 
 def check_inactive_threads():
     """Check for inactive threads and send reminders"""
-    while True:
-        try:
-            time.sleep(3600 * 6)  # Check every 6 hours
-            inactive_threads = thread_manager.get_inactive_threads(48)
-            
-            if inactive_threads:
-                reminder_text = f"🔔 *Thread Activity Reminder*\n\nThe following {len(inactive_threads)} thread(s) have been inactive for 2+ days:\n\n"
-                
-                for thread in inactive_threads:
-                    user_id = thread["user_id"]
-                    hours_inactive = int(thread["hours_inactive"])
-                    thread_ts = thread["thread_info"]["thread_ts"]
-                    reminder_text += f"• <@{user_id}> - {hours_inactive} hours inactive - https://hackclub.slack.com/archives/{CHANNEL}/p{thread_ts.replace('.', '')}\n"
-                
-                reminder_text += "\nPlease review and resolve these threads."
-                
-                try:
-                    client.chat_postMessage(
-                        channel=AI_ALERTS_CHANNEL,
-                        text=reminder_text
-                    )
-                    print(f"Sent reminder for {len(inactive_threads)} inactive threads")
-                except SlackApiError as err:
-                    print(f"Error sending reminder: {err}")
-                    
-        except Exception as err:
-            print(f"Error in inactive thread checker: {err}")
+    pass
 
 def check_ai_thread_resolutions():
     """Background task to check for resolved threads using AI"""
