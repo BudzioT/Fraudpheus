@@ -71,10 +71,10 @@ def get_user_trust_level(slack_id):
     """Get user's trust level from hackatime API"""
     try:
         api_url = "https://hackatime.hackclub.com/api/admin/v1/execute"
-        api_token = os.getenv("HACKATIME_API_TOKEN")
+        api_token = os.getenv("HACKATIME_API_KEY")
 
         if not api_token:
-            print("HACKATIME_API_TOKEN not found in environment")
+            print("HACKATIME_API_KEY not found in environment")
             return 4
 
         query = f"""
