@@ -21,9 +21,7 @@ stays in the channel for team notes
 - Keeping track of which cases are resolved and which not by marking threads as completed
 - Deleting threads to keep the channel clean
 - Transferring files between channel members and people DMing the bot 
-- AI powered thread resolving 🤓🤓 "i'm so cool ~ Arnav"
 - Integration with wakatime/hackatime fraud detectors
-- Backup chats feature
 
 ## Usage
 - Type `/fdchat @user msg` where `user` is a mention of someone (ping) and `msg` is your desired message. 
