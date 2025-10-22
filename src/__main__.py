@@ -689,6 +689,8 @@ def handle_all_messages(message, say, client, logger):
     elif channel_id == CHANNEL:
         if message_text and message_text.strip() == "!backup":
             handle_backup_command(message, client)
+        elif message_text and message_text.strip() == "!bulkresolve":
+            handle_bulkresolve_command(message, client)
         elif "thread_ts" in message:
             handle_channel_reply(message, client)
 
@@ -701,6 +703,10 @@ def handle_channel_reply(message, client):
 
     if reply_text and reply_text.strip() == "!backup":
         handle_backup_command(message, client)
+        return
+
+    if reply_text and reply_text.strip() == "!bulkresolve":
+        handle_bulkresolve_command(message, client)
         return
 
     is_macro = reply_text and any(reply_text.startswith(macro) for macro in MACROS.keys())
@@ -775,6 +781,143 @@ def handle_channel_reply(message, client):
                 print(f"Failed to add X reaction: {err}")
     else:
         print(f"Could not find user for thread {thread_ts}")
+
+def handle_bulkresolve_command(message, client):
+    """Handle !bulkresolve command to auto-resolve threads inactive for 2+ days"""
+    try:
+        thread_ts = message.get("thread_ts")
+        user_id = message.get("user")
+
+        # for the goobers who try to run this elsewhere
+        if thread_ts:
+            client.chat_postMessage(
+                channel=CHANNEL,
+                thread_ts=thread_ts,
+                text="⚠️ The `!bulkresolve` command can only be used in the main channel, not in threads.",
+                username="Bulk Resolve Bot"
+            )
+            return
+
+        # Get inactive threads (2+ days = 48+ hours)
+        inactive_threads = thread_manager.get_inactive_threads(40)
+
+        if not inactive_threads:
+            client.chat_postMessage(
+                channel=CHANNEL,
+                text="✅ No threads have been inactive for 2+ days. All threads are active!",
+                username="Bulk Resolve Bot"
+            )
+            return
+
+        initial_message = f"🔄 **Bulk Resolve Started**\n\nFound {len(inactive_threads)} thread(s) inactive for 2+ days.\nResolving threads and notifying users..."
+
+        initial_response = client.chat_postMessage(
+            channel=CHANNEL,
+            text=initial_message,
+            username="Bulk Resolve Bot"
+        )
+
+        initial_msg_ts = initial_response["ts"]
+
+        # Process in background
+        def run_bulkresolve():
+            resolved_count = 0
+            failed_count = 0
+
+            for thread_data in inactive_threads:
+                target_user_id = thread_data["user_id"]
+                thread_info = thread_data["thread_info"]
+                hours_inactive = thread_data["hours_inactive"]
+
+                try:
+                    dm_response = client.conversations_open(users=[target_user_id])
+                    dm_channel = dm_response["channel"]["id"]
+
+                    # Use Slack's mrkdwn formatting with small text via context block
+                    client.chat_postMessage(
+                        channel=dm_channel,
+                        text="Heyo, it looks like this thread has gone quiet!",
+                        blocks=[
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": "Heyo, it looks like this thread has gone quiet!"
+                                }
+                            },
+                            {
+                                "type": "context",
+                                "elements": [
+                                    {
+                                        "type": "mrkdwn",
+                                        "text": "_This action has been performed automatically by a friendly bot_"
+                                    }
+                                ]
+                            }
+                        ],
+                        username="Fraud Department",
+                        icon_emoji=":ban:"
+                    )
+
+                    # Complete the thread
+                    success = thread_manager.complete_thread(target_user_id)
+
+                    if success:
+                        resolved_count += 1
+                        # Dispatch event for tracking
+                        dispatch_event("thread.status.changed", {
+                            "thread_ts": thread_info.get("thread_ts"),
+                            "user_slack_id": target_user_id,
+                            "new_status": "completed",
+                            "timestamp": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat().replace("+00:00","Z"),
+                            "reason": "bulk_auto_resolve"
+                        })
+                        print(f"Auto-resolved thread for user {target_user_id} (inactive for {hours_inactive:.1f} hours)")
+                    else:
+                        failed_count += 1
+
+                except Exception as e:
+                    print(f"Error resolving thread for {target_user_id}: {e}")
+                    failed_count += 1
+
+            # Send completion report
+            report = f"✅ **Bulk Resolve Complete**\n\n"
+            report += f"• Resolved: {resolved_count}\n"
+            report += f"• Failed: {failed_count}\n"
+            report += f"• Total: {len(inactive_threads)}"
+
+            client.chat_postMessage(
+                channel=CHANNEL,
+                text=report,
+                username="Bulk Resolve Bot"
+            )
+
+            # Add checkmark to initial message
+            try:
+                client.reactions_add(
+                    channel=CHANNEL,
+                    timestamp=initial_msg_ts,
+                    name="white_check_mark"
+                )
+            except SlackApiError as err:
+                print(f"Failed to add reaction to initial message: {err}")
+
+        # Run in background thread
+        bulkresolve_thread = threading.Thread(target=run_bulkresolve, daemon=True)
+        bulkresolve_thread.start()
+
+        print(f"Bulk resolve command initiated by user {user_id} for {len(inactive_threads)} threads")
+
+    except Exception as err:
+        print(f"Error in bulkresolve command handler: {err}")
+        try:
+            client.chat_postMessage(
+                channel=CHANNEL,
+                text=f"❌ **Bulk Resolve Error**\n\nFailed to execute: {str(err)[:200]}",
+                username="Bulk Resolve Bot"
+            )
+        except:
+            pass
 
 def handle_backup_command(message, client):
     """Handle !backup command to start fraud case extraction"""
