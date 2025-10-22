@@ -799,7 +799,7 @@ def handle_bulkresolve_command(message, client):
             return
 
         # Get inactive threads (2+ days = 48+ hours)
-        inactive_threads = thread_manager.get_inactive_threads(40)
+        inactive_threads = thread_manager.get_inactive_threads(48)
 
         if not inactive_threads:
             client.chat_postMessage(
