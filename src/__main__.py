@@ -158,46 +158,133 @@ def check_inactive_threads():
         except Exception as err:
             print(f"Error in inactive thread checker: {err}")
 
+def get_user_info_for_backup(user_id):
+    """Get user info for backup export"""
+    try:
+        response = client.users_info(user=user_id)
+        user = response["user"]
+        return {
+            "id": user_id,
+            "name": user.get("name", ""),
+            "real_name": user.get("real_name", ""),
+            "display_name": user.get("profile", {}).get("display_name", ""),
+            "email": user.get("profile", {}).get("email", ""),
+            "is_bot": user.get("is_bot", False),
+            "avatar": user.get("profile", {}).get("image_72", "")
+        }
+    except SlackApiError as e:
+        print(f"Error getting user info for {user_id}: {e}")
+        return {
+            "id": user_id,
+            "name": "unknown",
+            "real_name": "Unknown User",
+            "display_name": "Unknown",
+            "email": "",
+            "is_bot": False,
+            "avatar": ""
+        }
+
 def create_backup_export():
-    """Export all thread data to JSON"""
+    """Export all thread data to JSON with full message history"""
     try:
         backup_data = {
             "export_timestamp": datetime.now(timezone.utc).isoformat(),
-            "active_threads": [],
-            "completed_threads": []
+            "channel_id": CHANNEL,
+            "fraud_cases": [],
+            "users": {},
+            "statistics": {}
         }
 
+        all_threads = []
+
+        # Collect active threads
         for user_id, thread_info in thread_manager.active_cache.items():
             thread_ts = thread_info.get("thread_ts")
             if thread_ts:
-                try:
-                    response = client.conversations_replies(
-                        channel=CHANNEL,
-                        ts=thread_ts,
-                        limit=1000
-                    )
-                    messages = response.get("messages", [])
-                    backup_data["active_threads"].append({
-                        "user_id": user_id,
-                        "thread_ts": thread_ts,
-                        "message_count": len(messages),
-                        "created_at": datetime.fromtimestamp(float(thread_ts)).isoformat() if thread_ts else None
-                    })
-                except Exception as err:
-                    print(f"Error fetching thread {thread_ts}: {err}")
+                all_threads.append({
+                    "user_id": user_id,
+                    "thread_ts": thread_ts,
+                    "status": "active"
+                })
 
+        # Collect completed threads
         for user_id, threads in thread_manager.completed_cache.items():
             for thread in threads:
                 thread_ts = thread.get("thread_ts")
                 if thread_ts:
-                    backup_data["completed_threads"].append({
+                    all_threads.append({
                         "user_id": user_id,
-                        "thread_ts": thread_ts
+                        "thread_ts": thread_ts,
+                        "status": "completed"
                     })
 
+        # Extract full message data for each thread
+        for thread_data in all_threads:
+            user_id = thread_data["user_id"]
+            thread_ts = thread_data["thread_ts"]
+            status = thread_data["status"]
+
+            try:
+                response = client.conversations_replies(
+                    channel=CHANNEL,
+                    ts=thread_ts,
+                    limit=1000
+                )
+                messages = response.get("messages", [])
+
+                if not messages:
+                    continue
+
+                # Get user info
+                if user_id not in backup_data["users"]:
+                    backup_data["users"][user_id] = get_user_info_for_backup(user_id)
+
+                case_data = {
+                    "case_id": thread_ts,
+                    "reported_user_id": user_id,
+                    "status": status,
+                    "thread_ts": thread_ts,
+                    "messages": [],
+                    "created_at": None,
+                    "last_activity": None,
+                    "total_messages": len(messages)
+                }
+
+                for i, message in enumerate(messages):
+                    msg_user_id = message.get("user")
+
+                    if msg_user_id and msg_user_id not in backup_data["users"]:
+                        backup_data["users"][msg_user_id] = get_user_info_for_backup(msg_user_id)
+
+                    message_data = {
+                        "ts": message.get("ts"),
+                        "user": msg_user_id,
+                        "text": message.get("text", ""),
+                        "timestamp": datetime.fromtimestamp(float(message.get("ts", 0))).isoformat() if message.get("ts") else None,
+                        "is_bot": message.get("bot_id") is not None,
+                        "bot_id": message.get("bot_id"),
+                        "username": message.get("username"),
+                        "is_from_reported_user": msg_user_id == user_id and not message.get("bot_id")
+                    }
+
+                    case_data["messages"].append(message_data)
+
+                    if i == 0:
+                        case_data["created_at"] = message_data["timestamp"]
+
+                    case_data["last_activity"] = message_data["timestamp"]
+
+                backup_data["fraud_cases"].append(case_data)
+
+            except Exception as err:
+                print(f"Error fetching thread {thread_ts}: {err}")
+
         backup_data["statistics"] = {
-            "total_active": len(backup_data["active_threads"]),
-            "total_completed": len(backup_data["completed_threads"]),
+            "total_cases": len(backup_data["fraud_cases"]),
+            "active_cases": len([c for c in backup_data["fraud_cases"] if c["status"] == "active"]),
+            "completed_cases": len([c for c in backup_data["fraud_cases"] if c["status"] == "completed"]),
+            "total_users": len(backup_data["users"]),
+            "total_messages": sum(c["total_messages"] for c in backup_data["fraud_cases"])
         }
 
         return backup_data
@@ -206,50 +293,6 @@ def create_backup_export():
         print(f"Error creating backup export: {err}")
         return None
 
-def run_scheduled_backup():
-    """Run backup every 12 hours"""
-    while True:
-        try:
-            time.sleep(3600 * 12)
-            print("Starting scheduled backup...")
-
-            backup_data = create_backup_export()
-            if not backup_data:
-                print("Backup failed: could not create export data")
-                continue
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"fraudpheus_backup_{timestamp}.json"
-            json_content = json.dumps(backup_data, indent=2, ensure_ascii=False)
-
-            client.chat_postMessage(
-                channel=CHANNEL,
-                text=f"🔄 *Scheduled Backup*\n\nActive threads: {backup_data['statistics']['total_active']}\nCompleted threads: {backup_data['statistics']['total_completed']}",
-                username="Backup Bot",
-                icon_emoji=":floppy_disk:"
-            )
-
-            client.files_upload_v2(
-                channel=CHANNEL,
-                content=json_content.encode('utf-8'),
-                filename=filename,
-                title=f"Fraudpheus Backup - {timestamp}",
-                initial_comment=f"✅ Scheduled backup completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-
-            print(f"Scheduled backup completed: {filename}")
-
-        except Exception as err:
-            print(f"Error in scheduled backup: {err}")
-            try:
-                client.chat_postMessage(
-                    channel=CHANNEL,
-                    text=f"❌ *Backup Failed*\n\nError: {str(err)[:200]}",
-                    username="Backup Bot",
-                    icon_emoji=":x:"
-                )
-            except:
-                pass
 
 def get_standard_channel_msg(user_id, message_text):
     """Get blocks for a standard message uploaded into channel with 2 buttons"""
@@ -962,10 +1005,10 @@ def handle_backup_command(message, client):
                     return
 
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"fraudpheus_backup_{timestamp}.json"
+                filename = f"fraudpheus_messages_{timestamp}.json"
                 json_content = json.dumps(backup_data, indent=2, ensure_ascii=False)
 
-                success_msg = f"✅ **Backup Complete!**\n\nActive threads: {backup_data['statistics']['total_active']}\nCompleted threads: {backup_data['statistics']['total_completed']}"
+                success_msg = f"✅ **Message Export Complete!**\n\n**Statistics:**\n• {backup_data['statistics']['total_cases']} fraud cases\n• {backup_data['statistics']['total_messages']} total messages\n• {backup_data['statistics']['total_users']} users"
 
                 if thread_ts:
                     client.chat_postMessage(
@@ -985,8 +1028,8 @@ def handle_backup_command(message, client):
                     channel=CHANNEL,
                     content=json_content.encode('utf-8'),
                     filename=filename,
-                    title=f"Fraudpheus Backup - {timestamp}",
-                    initial_comment="Backup file attached",
+                    title=f"Fraudpheus Message Export - {timestamp}",
+                    initial_comment="**Backup file attached below** 📎",
                     thread_ts=thread_ts
                 )
 
@@ -1348,11 +1391,7 @@ if __name__ == "__main__":
     auto_close_thread = threading.Thread(target=check_inactive_threads, daemon=True)
     auto_close_thread.start()
 
-    backup_thread = threading.Thread(target=run_scheduled_backup, daemon=True)
-    backup_thread.start()
-
     handler = SocketModeHandler(app, os.getenv("SLACK_APP_TOKEN"))
     print("Bot running!")
     print("Auto-close inactive threads system started")
-    print("Scheduled backup system started (every 12 hours)")
     handler.start()
