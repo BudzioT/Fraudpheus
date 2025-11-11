@@ -126,7 +126,7 @@ def get_past_threads_info(user_id):
     return result
 
 def check_inactive_threads():
-    """Check for inactive threads and send close message after 5 days"""
+    """Check for inactive threads and send close message after 5 days
     while True:
         try:
             time.sleep(3600 * 12)
@@ -157,6 +157,8 @@ def check_inactive_threads():
 
         except Exception as err:
             print(f"Error in inactive thread checker: {err}")
+            """
+    pass
 
 def get_user_info_for_backup(user_id):
     """Get user info for backup export"""
@@ -1388,8 +1390,8 @@ def error_handler(error, body, logger):
     logger.info(f"Request body: {body}")
 
 if __name__ == "__main__":
-    auto_close_thread = threading.Thread(target=check_inactive_threads, daemon=True)
-    auto_close_thread.start()
+    #auto_close_thread = threading.Thread(target=check_inactive_threads, daemon=True)
+    #auto_close_thread.start()
 
     handler = SocketModeHandler(app, os.getenv("SLACK_APP_TOKEN"))
     print("Bot running!")
