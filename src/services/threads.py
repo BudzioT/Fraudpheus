@@ -117,6 +117,24 @@ def post_message_to_channel(
     user_channel_id: Optional[str] = None,
 ) -> Optional[bool]:
     """Post user's message to the given channel, either as new message or new reply"""
+    # Prevent Slack-wide and usergroup pings from being forwarded verbatim.
+    message_text = re.sub(
+        r"<!(channel|here|everyone)(?:\|[^>]+)?>",
+        r"\1",
+        message_text,
+        flags=re.IGNORECASE,
+    )
+    message_text = re.sub(
+        r"(?<!\w)@(channel|here|everyone|fraudsters)\b",
+        r"\1",
+        message_text,
+        flags=re.IGNORECASE,
+    )
+    message_text = re.sub(
+        r"(?:<@S097CMCDK6C>|<!subteam\^S097CMCDK6C(?:\|[^>]+)?>)",
+        "Fraud Squad Team (Fraudsters)",
+        message_text,
+    )
     if not message_text or message_text.strip() == "":
         return None
 
